@@ -82,8 +82,8 @@ def _rasterize_lines_engine(
     y_grid_min,
     y_grid_max,
     mode_is_binary,
-    raster_data,
 ):
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
     for geom_coords in geoms:
         for i in range(len(geom_coords) - 1):
             xa, ya = geom_coords[i]
@@ -241,8 +241,8 @@ def _rasterize_polygons_engine(
     y_grid_min,
     y_grid_max,
     mode_is_binary,
-    raster_data,
 ):
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
     for exterior_coords, interior_coords_list in geoms:
         poly_xmin, poly_ymin, poly_xmax, poly_ymax = (
             np.min(exterior_coords[:, 0]),

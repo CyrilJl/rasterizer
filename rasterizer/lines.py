@@ -36,14 +36,12 @@ def rasterize_lines(
 
     lines_proj = lines.to_crs(crs)
 
-    if mode == "binary":
-        raster_data = np.full((len(y), len(x)), False, dtype=bool)
-    else:
-        raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-
-    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-
     if lines_proj.empty or len(x) < 2 or len(y) < 2:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
     dx = x[1] - x[0]
@@ -62,7 +60,7 @@ def rasterize_lines(
         elif isinstance(geom, LineString):
             geoms_to_process.append(np.array(geom.coords))
 
-    raster.values[:] = _rasterize_lines_engine(
+    raster_data_float = _rasterize_lines_engine(
         geoms_to_process,
         x,
         y,
@@ -75,7 +73,13 @@ def rasterize_lines(
         y_grid_min,
         y_grid_max,
         mode == "binary",
-        raster.values.astype(np.float32),
     )
+
+    if mode == "binary":
+        raster_data = raster_data_float.astype(bool)
+    else:
+        raster_data = raster_data_float
+
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
     return geocode(raster, "x", "y", crs)

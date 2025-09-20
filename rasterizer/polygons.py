@@ -38,14 +38,12 @@ def rasterize_polygons(
 
     polygons_proj = polygons.to_crs(crs)
 
-    if mode == "binary":
-        raster_data = np.full((len(y), len(x)), False, dtype=bool)
-    else:
-        raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-
-    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-
     if polygons_proj.empty or len(x) < 2 or len(y) < 2:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
     dx = x[1] - x[0]
@@ -79,9 +77,14 @@ def rasterize_polygons(
             geoms_to_process.append((exterior_coords, interior_coords_list))
 
     if not geoms_to_process:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
-    raster.values[:] = _rasterize_polygons_engine(
+    raster_data_float = _rasterize_polygons_engine(
         geoms_to_process,
         x,
         y,
@@ -94,7 +97,13 @@ def rasterize_polygons(
         y_grid_min,
         y_grid_max,
         mode == "binary",
-        raster.values.astype(np.float32),
     )
+
+    if mode == "binary":
+        raster_data = raster_data_float.astype(bool)
+    else:
+        raster_data = raster_data_float
+
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
     return geocode(raster, "x", "y", crs)
