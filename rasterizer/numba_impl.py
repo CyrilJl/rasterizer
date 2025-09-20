@@ -71,7 +71,19 @@ def _clip_line_cohen_sutherland_numba(xa, ya, xb, yb, xmin, ymin, xmax, ymax):
 
 @numba.jit(nopython=True, fastmath=True)
 def _rasterize_lines_engine(
-    geoms, x, y, dx, dy, half_dx, half_dy, x_grid_min, x_grid_max, y_grid_min, y_grid_max, mode_is_binary, raster_data
+    geoms,
+    x,
+    y,
+    dx,
+    dy,
+    half_dx,
+    half_dy,
+    x_grid_min,
+    x_grid_max,
+    y_grid_min,
+    y_grid_max,
+    mode_is_binary,
+    raster_data,
 ):
     for geom_coords in geoms:
         for i in range(len(geom_coords) - 1):
@@ -223,7 +235,19 @@ def _clip_polygon_numba(subject_coords, clip_box):
 
 @numba.jit(nopython=True, fastmath=True)
 def _rasterize_polygons_engine(
-    geoms, x, y, dx, dy, half_dx, half_dy, x_grid_min, x_grid_max, y_grid_min, y_grid_max, mode_is_binary, raster_data
+    geoms,
+    x,
+    y,
+    dx,
+    dy,
+    half_dx,
+    half_dy,
+    x_grid_min,
+    x_grid_max,
+    y_grid_min,
+    y_grid_max,
+    mode_is_binary,
+    raster_data,
 ):
     for exterior_coords, interior_coords_list in geoms:
         poly_xmin, poly_ymin, poly_xmax, poly_ymax = (
@@ -269,7 +293,9 @@ def _rasterize_polygons_engine(
                 # Clip interiors (holes) and subtract their areas
                 if interior_coords_list:
                     for interior_coords in interior_coords_list:
-                        clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
+                        clipped_interior = _clip_polygon_numba(
+                            interior_coords, clip_box
+                        )
                         area -= _polygon_area_numba(clipped_interior)
 
                 if area > 1e-9:
