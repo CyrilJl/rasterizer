@@ -2,9 +2,9 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rioxarray
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
 
-from rasterizer import rasterize_lines
+from rasterizer import rasterize_lines, rasterize_polygons
 
 # Common setup for tests
 CRS = "EPSG:32631"  # UTM 31N, metric CRS
@@ -134,3 +134,82 @@ def test_line_on_boundary(grid):
     raster_bin = rasterize_lines(gdf, **grid, mode="binary")
     assert raster_bin.values[5, 0]
     assert raster_bin.values[5, 1]
+
+
+def test_polygon_binary_mode(grid):
+    # A square polygon covering 4 cells completely
+    # Cells are (1,1), (1,2), (2,1), (2,2)
+    # Cell boundaries for x and y are [1,2], [2,3]
+    # So the polygon should cover from 1 to 3 in both axes
+    poly = Polygon([(1, 1), (1, 3), (3, 3), (3, 1), (1, 1)])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="binary")
+
+    expected = np.zeros_like(raster.values, dtype=bool)
+    # y coords are 1.5, 2.5 which correspond to indices 1, 2
+    # x coords are 1.5, 2.5 which correspond to indices 1, 2
+    expected[1:3, 1:3] = True
+
+    np.testing.assert_array_equal(raster.values, expected)
+
+def test_polygon_area_mode(grid):
+    # A triangle covering half of cell (1,1)
+    # Cell (1,1) boundaries are x:[1,2], y:[1,2], center is (1.5, 1.5)
+    poly = Polygon([(1, 1), (1, 2), (2, 1), (1, 1)]) # Area should be 0.5
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="area")
+
+    expected = np.zeros_like(raster.values, dtype=np.float32)
+    expected[1, 1] = 0.5
+
+    np.testing.assert_allclose(raster.values, expected, atol=1e-6)
+
+def test_polygon_with_hole(grid):
+    # A square polygon covering cell (1,1) with a hole in the middle
+    # Cell (1,1) is x:[1,2], y:[1,2]. Area is 1.0
+    outer = [(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)]
+    # Hole is 0.5x0.5, area is 0.25
+    inner = [(1.25, 1.25), (1.75, 1.25), (1.75, 1.75), (1.25, 1.75), (1.25, 1.25)]
+    poly = Polygon(outer, [inner])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="area")
+
+    expected = np.zeros_like(raster.values, dtype=np.float32)
+    expected[1,1] = 1.0 - 0.25
+
+    np.testing.assert_allclose(raster.values, expected, atol=1e-6)
+
+def test_multipolygon(grid):
+    # Two squares, one in cell (1,1) and one in (3,3)
+    poly1 = Polygon([(1,1), (1,2), (2,2), (2,1), (1,1)])
+    poly2 = Polygon([(3,3), (3,4), (4,4), (4,3), (3,3)])
+    mpoly = MultiPolygon([poly1, poly2])
+    gdf = gpd.GeoDataFrame([1], geometry=[mpoly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="binary")
+
+    expected = np.zeros_like(raster.values, dtype=bool)
+    expected[1,1] = True
+    expected[3,3] = True
+
+    np.testing.assert_array_equal(raster.values, expected)
+
+def test_polygon_empty_input(grid):
+    gdf = gpd.GeoDataFrame([], geometry=[], crs=CRS)
+    raster = rasterize_polygons(gdf, **grid, mode="binary")
+    assert not np.any(raster.values)
+
+def test_polygon_no_intersection(grid):
+    poly = Polygon([(-1, -1), (-1, -2), (-2, -2), (-2, -1), (-1,-1)])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+    raster = rasterize_polygons(gdf, **grid, mode="binary")
+    assert not np.any(raster.values)
+
+def test_polygon_invalid_mode(grid):
+    poly = Polygon([(1, 1), (1, 2), (2, 1)])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+    with pytest.raises(ValueError, match="Le mode doit être 'binary' ou 'area'"):
+        rasterize_polygons(gdf, **grid, mode="invalid")
