@@ -1,8 +1,7 @@
 import geopandas as gpd
 import numpy as np
-import rioxarray as rio
 import xarray as xr
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from .rasterizer import geocode
 
@@ -141,12 +140,7 @@ def rasterize_polygons(
         for poly in geoms_to_process:
             poly_xmin, poly_ymin, poly_xmax, poly_ymax = poly.bounds
 
-            if (
-                poly_xmax < x_grid_min
-                or poly_xmin > x_grid_max
-                or poly_ymax < y_grid_min
-                or poly_ymin > y_grid_max
-            ):
+            if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
                 continue
 
             ix_start = np.searchsorted(x, poly_xmin - half_dx, side="left")

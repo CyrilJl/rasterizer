@@ -2,7 +2,6 @@ import math
 
 import geopandas as gpd
 import numpy as np
-import rioxarray as rio
 import xarray as xr
 from shapely.geometry import LineString, MultiLineString
 
@@ -135,12 +134,7 @@ def rasterize_lines(
                 seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
                 seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
 
-                if (
-                    seg_xmax < x_grid_min
-                    or seg_xmin > x_grid_max
-                    or seg_ymax < y_grid_min
-                    or seg_ymin > y_grid_max
-                ):
+                if seg_xmax < x_grid_min or seg_xmin > x_grid_max or seg_ymax < y_grid_min or seg_ymin > y_grid_max:
                     continue
 
                 ix_start = np.searchsorted(x, seg_xmin - half_dx, side="left")
