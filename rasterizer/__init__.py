@@ -1,2 +1,3 @@
 # flake8: noqa
-from .rasterizer import rasterize_lines, rasterize_polygons
+from .lines import rasterize_lines
+from .polygons import rasterize_polygons

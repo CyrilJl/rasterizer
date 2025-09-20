@@ -112,7 +112,7 @@ def test_invalid_mode(grid):
     line = LineString([(1, 1), (2, 2)])
     gdf = gpd.GeoDataFrame([1], geometry=[line], crs=CRS)
 
-    with pytest.raises(ValueError, match="Le mode doit être 'binary' ou 'length'"):
+    with pytest.raises(ValueError, match="Mode must be 'binary' or 'length'"):
         rasterize_lines(gdf, **grid, mode="invalid_mode")
 
 
@@ -217,5 +217,5 @@ def test_polygon_no_intersection(grid):
 def test_polygon_invalid_mode(grid):
     poly = Polygon([(1, 1), (1, 2), (2, 1)])
     gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
-    with pytest.raises(ValueError, match="Le mode doit être 'binary' ou 'area'"):
+    with pytest.raises(ValueError, match="Mode must be 'binary' or 'area'"):
         rasterize_polygons(gdf, **grid, mode="invalid")
