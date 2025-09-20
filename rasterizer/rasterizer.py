@@ -80,7 +80,13 @@ def clip_line_cohen_sutherland(xa, ya, xb, yb, xmin, ymin, xmax, ymax):
         return 0.0
 
 
-def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, mode="binary"):
+def rasterize_lines(
+    lines: gpd.GeoDataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
+    crs,
+    mode="binary",
+) -> xr.DataArray:
     """
     Rastérise un GeoDataFrame de LineString et MultiLineString sur une grille régulière.
 
@@ -169,7 +175,14 @@ def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, 
                             clip_box_ymax -= 1e-9
 
                         clipped_length = clip_line_cohen_sutherland(
-                            xa, ya, xb, yb, clip_box_xmin, clip_box_ymin, clip_box_xmax, clip_box_ymax
+                            xa,
+                            ya,
+                            xb,
+                            yb,
+                            clip_box_xmin,
+                            clip_box_ymin,
+                            clip_box_xmax,
+                            clip_box_ymax,
                         )
 
                         if clipped_length > 1e-9:
