@@ -1,8 +1,9 @@
 import math
-import numpy as np
-import xarray as xr
+
 import geopandas as gpd
-import rioxarray
+import numpy as np
+import rioxarray as rio
+import xarray as xr
 from shapely.geometry import LineString, MultiLineString
 
 
@@ -74,12 +75,12 @@ def clip_line_cohen_sutherland(xa, ya, xb, yb, xmin, ymin, xmax, ymax):
             outcode_b = compute_outcode(x2, y2)
 
     if accept:
-        return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
     else:
         return 0.0
 
 
-def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, mode='binary'):
+def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, mode="binary"):
     """
     Rastérise un GeoDataFrame de LineString et MultiLineString sur une grille régulière.
 
@@ -95,24 +96,20 @@ def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, 
     Returns:
         xr.DataArray: Un DataArray rastérisé.
     """
-    if mode not in ['binary', 'length']:
+    if mode not in ["binary", "length"]:
         raise ValueError("Le mode doit être 'binary' ou 'length'")
 
     lines_proj = lines.to_crs(crs)
 
-    if mode == 'binary':
+    if mode == "binary":
         raster_data = np.full((len(y), len(x)), False, dtype=bool)
     else:
         raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
 
-    raster = xr.DataArray(
-        raster_data,
-        coords={'y': y, 'x': x},
-        dims=['y', 'x']
-    )
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
     if lines_proj.empty or len(x) < 2 or len(y) < 2:
-        return geocode(raster, 'x', 'y', crs)
+        return geocode(raster, "x", "y", crs)
 
     dx = x[1] - x[0]
     dy = y[1] - y[0]
@@ -133,19 +130,18 @@ def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, 
             coords = list(line.coords)
             for i in range(len(coords) - 1):
                 xa, ya = coords[i]
-                xb, yb = coords[i+1]
+                xb, yb = coords[i + 1]
 
                 seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
                 seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
 
-                if seg_xmax < x_grid_min or seg_xmin > x_grid_max or \
-                   seg_ymax < y_grid_min or seg_ymin > y_grid_max:
+                if seg_xmax < x_grid_min or seg_xmin > x_grid_max or seg_ymax < y_grid_min or seg_ymin > y_grid_max:
                     continue
 
-                ix_start = np.searchsorted(x, seg_xmin - half_dx, side='left')
-                ix_end = np.searchsorted(x, seg_xmax + half_dx, side='right')
-                iy_start = np.searchsorted(y, seg_ymin - half_dy, side='left')
-                iy_end = np.searchsorted(y, seg_ymax + half_dy, side='right')
+                ix_start = np.searchsorted(x, seg_xmin - half_dx, side="left")
+                ix_end = np.searchsorted(x, seg_xmax + half_dx, side="right")
+                iy_start = np.searchsorted(y, seg_ymin - half_dy, side="left")
+                iy_end = np.searchsorted(y, seg_ymax + half_dy, side="right")
 
                 ix_start = max(0, ix_start)
                 iy_start = max(0, iy_start)
@@ -159,8 +155,13 @@ def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, 
                         cell_ymin = y[iy] - half_dy
                         cell_ymax = y[iy] + half_dy
 
-                        clip_box_xmin, clip_box_ymin, clip_box_xmax, clip_box_ymax = cell_xmin, cell_ymin, cell_xmax, cell_ymax
-                        if mode == 'length':
+                        clip_box_xmin, clip_box_ymin, clip_box_xmax, clip_box_ymax = (
+                            cell_xmin,
+                            cell_ymin,
+                            cell_xmax,
+                            cell_ymax,
+                        )
+                        if mode == "length":
                             # Implement a top-left rule by shrinking the clip box slightly
                             # to make right and top boundaries exclusive. This avoids
                             # double-counting lengths for lines on boundaries.
@@ -168,13 +169,12 @@ def rasterize_lines(lines: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray, crs, 
                             clip_box_ymax -= 1e-9
 
                         clipped_length = clip_line_cohen_sutherland(
-                            xa, ya, xb, yb,
-                            clip_box_xmin, clip_box_ymin, clip_box_xmax, clip_box_ymax
+                            xa, ya, xb, yb, clip_box_xmin, clip_box_ymin, clip_box_xmax, clip_box_ymax
                         )
 
                         if clipped_length > 1e-9:
-                            if mode == 'binary':
+                            if mode == "binary":
                                 raster.values[iy, ix] = True
                             else:
                                 raster.values[iy, ix] += clipped_length
-    return geocode(raster, 'x', 'y', crs)
+    return geocode(raster, "x", "y", crs)
