@@ -2,6 +2,7 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 from shapely.geometry import MultiPolygon, Polygon
+from tqdm.auto import tqdm
 
 from .rasterizer import geocode
 
@@ -91,6 +92,7 @@ def rasterize_polygons(
     y: np.ndarray,
     crs,
     mode="binary",
+    progress_bar=False,
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular grid.
@@ -130,7 +132,7 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    for geom in polygons_proj.geometry:
+    for geom in tqdm(polygons_proj.geometry, disable=not progress_bar):
         geoms_to_process = []
         if isinstance(geom, MultiPolygon):
             geoms_to_process.extend(list(geom.geoms))
