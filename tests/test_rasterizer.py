@@ -153,10 +153,11 @@ def test_polygon_binary_mode(grid):
 
     np.testing.assert_array_equal(raster.values, expected)
 
+
 def test_polygon_area_mode(grid):
     # A triangle covering half of cell (1,1)
     # Cell (1,1) boundaries are x:[1,2], y:[1,2], center is (1.5, 1.5)
-    poly = Polygon([(1, 1), (1, 2), (2, 1), (1, 1)]) # Area should be 0.5
+    poly = Polygon([(1, 1), (1, 2), (2, 1), (1, 1)])  # Area should be 0.5
     gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
 
     raster = rasterize_polygons(gdf, **grid, mode="area")
@@ -165,6 +166,7 @@ def test_polygon_area_mode(grid):
     expected[1, 1] = 0.5
 
     np.testing.assert_allclose(raster.values, expected, atol=1e-6)
+
 
 def test_polygon_with_hole(grid):
     # A square polygon covering cell (1,1) with a hole in the middle
@@ -178,35 +180,39 @@ def test_polygon_with_hole(grid):
     raster = rasterize_polygons(gdf, **grid, mode="area")
 
     expected = np.zeros_like(raster.values, dtype=np.float32)
-    expected[1,1] = 1.0 - 0.25
+    expected[1, 1] = 1.0 - 0.25
 
     np.testing.assert_allclose(raster.values, expected, atol=1e-6)
 
+
 def test_multipolygon(grid):
     # Two squares, one in cell (1,1) and one in (3,3)
-    poly1 = Polygon([(1,1), (1,2), (2,2), (2,1), (1,1)])
-    poly2 = Polygon([(3,3), (3,4), (4,4), (4,3), (3,3)])
+    poly1 = Polygon([(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)])
+    poly2 = Polygon([(3, 3), (3, 4), (4, 4), (4, 3), (3, 3)])
     mpoly = MultiPolygon([poly1, poly2])
     gdf = gpd.GeoDataFrame([1], geometry=[mpoly], crs=CRS)
 
     raster = rasterize_polygons(gdf, **grid, mode="binary")
 
     expected = np.zeros_like(raster.values, dtype=bool)
-    expected[1,1] = True
-    expected[3,3] = True
+    expected[1, 1] = True
+    expected[3, 3] = True
 
     np.testing.assert_array_equal(raster.values, expected)
+
 
 def test_polygon_empty_input(grid):
     gdf = gpd.GeoDataFrame([], geometry=[], crs=CRS)
     raster = rasterize_polygons(gdf, **grid, mode="binary")
     assert not np.any(raster.values)
 
+
 def test_polygon_no_intersection(grid):
-    poly = Polygon([(-1, -1), (-1, -2), (-2, -2), (-2, -1), (-1,-1)])
+    poly = Polygon([(-1, -1), (-1, -2), (-2, -2), (-2, -1), (-1, -1)])
     gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
     raster = rasterize_polygons(gdf, **grid, mode="binary")
     assert not np.any(raster.values)
+
 
 def test_polygon_invalid_mode(grid):
     poly = Polygon([(1, 1), (1, 2), (2, 1)])
