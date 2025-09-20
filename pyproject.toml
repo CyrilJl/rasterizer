@@ -1,0 +1,18 @@
+[project]
+name = "line-rasterizer"
+version = "0.1.0"
+description = "A Python package to rasterize GeoDataFrames of LineStrings and MultiLineStrings."
+authors = [{name = "Jules"}]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "geopandas",
+    "xarray",
+    "numpy",
+    "shapely",
+    "rioxarray"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
