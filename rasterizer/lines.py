@@ -52,13 +52,13 @@ def rasterize_lines(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    geoms_to_process = []
-    for geom in tqdm(lines_proj.geometry, disable=not progress_bar):
-        if isinstance(geom, MultiLineString):
-            for line in geom.geoms:
-                geoms_to_process.append(np.array(line.coords))
-        elif isinstance(geom, LineString):
-            geoms_to_process.append(np.array(geom.coords))
+    geoms_to_process = (
+        lines_proj.explode(index_parts=True)
+        .reset_index(drop=True)
+        .get_coordinates()
+        .reset_index()
+        .values
+    )
 
     raster_data_float = _rasterize_lines_engine(
         geoms_to_process,

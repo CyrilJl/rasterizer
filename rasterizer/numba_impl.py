@@ -84,10 +84,11 @@ def _rasterize_lines_engine(
     mode_is_binary,
 ):
     raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-    for geom_coords in geoms:
-        for i in range(len(geom_coords) - 1):
-            xa, ya = geom_coords[i]
-            xb, yb = geom_coords[i + 1]
+    for i in range(len(geoms) - 1):
+        # Check if the current and next points belong to the same line
+        if geoms[i, 0] == geoms[i + 1, 0]:
+            xa, ya = geoms[i, 1], geoms[i, 2]
+            xb, yb = geoms[i + 1, 1], geoms[i + 1, 2]
 
             seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
             seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
