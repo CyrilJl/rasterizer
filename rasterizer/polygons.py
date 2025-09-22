@@ -10,6 +10,23 @@ from .numba_impl import _rasterize_polygons_engine
 from .rasterizer import geocode
 
 
+def compute_exterior(gdf_poly):
+    ret = gdf_poly.geometry.exterior.get_coordinates().reset_index().values
+    return ret
+
+
+def compute_interiors(gdf_poly):
+    interiors = gdf_poly.geometry.interiors
+    ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
+    temp_df = ret.reset_index()
+    temp_df["sub_index"] = ret.groupby("index").cumcount()
+    ret["sub_index"] = temp_df["sub_index"].values
+
+    ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
+    ret = ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
+    return ret
+
+
 def rasterize_polygons(
     polygons: gpd.GeoDataFrame,
     x: np.ndarray,
@@ -62,18 +79,55 @@ def rasterize_polygons(
     )
     geoms_to_process = List.empty_list(geom_type)
 
-    for geom in tqdm(polygons_proj.geometry, disable=not progress_bar):
-        geoms = []
-        if isinstance(geom, MultiPolygon):
-            geoms.extend(list(geom.geoms))
-        elif isinstance(geom, Polygon):
-            geoms.append(geom)
+    polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
 
-        for poly in geoms:
-            exterior_coords = np.ascontiguousarray(poly.exterior.coords)
+    exteriors = compute_exterior(polygons_proj)
+    interiors = compute_interiors(polygons_proj)
+
+    if exteriors.shape[0] > 0:
+        ext_boundaries = np.concatenate(
+            (
+                [0],
+                np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1,
+                [exteriors.shape[0]],
+            )
+        )
+
+        int_ring_boundaries = None
+        int_ring_poly_idx = None
+        if interiors.shape[0] > 0:
+            int_ids = interiors[:, :2]  # poly_idx, ring_idx
+            int_ring_boundaries = np.concatenate(
+                (
+                    [0],
+                    np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1,
+                    [int_ids.shape[0]],
+                )
+            )
+            int_ring_poly_idx = interiors[int_ring_boundaries[:-1], 0]
+
+        num_polygons = len(polygons_proj)
+        int_ring_cursor = 0
+        for i in tqdm(range(num_polygons), disable=not progress_bar):
+            ext_start, ext_end = ext_boundaries[i], ext_boundaries[i + 1]
+            exterior_coords = np.ascontiguousarray(exteriors[ext_start:ext_end, 1:3])
+
             interior_coords_list = List.empty_list(types.float64[:, ::1])
-            for interior in poly.interiors:
-                interior_coords_list.append(np.ascontiguousarray(interior.coords))
+            if int_ring_boundaries is not None:
+                while (
+                    int_ring_cursor < len(int_ring_poly_idx)
+                    and int_ring_poly_idx[int_ring_cursor] == i
+                ):
+                    int_start, int_end = (
+                        int_ring_boundaries[int_ring_cursor],
+                        int_ring_boundaries[int_ring_cursor + 1],
+                    )
+                    interior_coords = np.ascontiguousarray(
+                        interiors[int_start:int_end, 2:4]
+                    )
+                    interior_coords_list.append(interior_coords)
+                    int_ring_cursor += 1
+
             geoms_to_process.append((exterior_coords, interior_coords_list))
 
     if not geoms_to_process:
