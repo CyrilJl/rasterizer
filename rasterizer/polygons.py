@@ -55,6 +55,12 @@ def rasterize_polygons(
     if mode not in ["binary", "area"]:
         raise ValueError("Mode must be 'binary' or 'area'")
 
+    polygons = polygons.copy()
+    polygons.geometry = polygons.geometry.force_2d()
+
+    geom_types = polygons.geometry.geom_type
+    polygons = polygons[geom_types.isin(["Polygon", "MultiPolygon"])]
+
     polygons_proj = polygons.to_crs(crs)
 
     if polygons_proj.empty or len(x) < 2 or len(y) < 2:

@@ -138,6 +138,35 @@ def test_line_on_boundary(grid):
     assert raster_bin.values[5, 0] or raster_bin.values[5, 1]
 
 
+def test_line_with_mixed_geometries(grid):
+    # A mix of a line and a polygon
+    line = LineString([(0, 5.5), (10, 5.5)])
+    poly = Polygon([(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)])
+    gdf = gpd.GeoDataFrame([1, 2], geometry=[line, poly], crs=CRS)
+
+    raster = rasterize_lines(gdf, **grid, mode="binary")
+
+    # Only the line should be rasterized
+    expected = np.zeros_like(raster.values, dtype=bool)
+    expected[5, :] = True
+
+    np.testing.assert_array_equal(raster.values, expected)
+
+
+def test_line_with_z_coordinate(grid):
+    # A line with a Z coordinate
+    line = LineString([(0, 5.5, 10), (10, 5.5, 20)])
+    gdf = gpd.GeoDataFrame([1], geometry=[line], crs=CRS)
+
+    raster = rasterize_lines(gdf, **grid, mode="binary")
+
+    # The Z coordinate should be ignored
+    expected = np.zeros_like(raster.values, dtype=bool)
+    expected[5, :] = True
+
+    np.testing.assert_array_equal(raster.values, expected)
+
+
 def test_polygon_binary_mode(grid):
     # A square polygon covering 4 cells completely
     # Cells are (1,1), (1,2), (2,1), (2,2)
@@ -221,6 +250,36 @@ def test_polygon_invalid_mode(grid):
     gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
     with pytest.raises(ValueError, match="Mode must be 'binary' or 'area'"):
         rasterize_polygons(gdf, **grid, mode="invalid")
+
+
+def test_polygon_with_mixed_geometries(grid):
+    # A mix of a polygon and a line
+    poly = Polygon([(1, 1), (1, 2), (2, 1), (1, 1)])
+    line = LineString([(0, 5.5), (10, 5.5)])
+    gdf = gpd.GeoDataFrame([1, 2], geometry=[poly, line], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="binary")
+
+    # Only the polygon should be rasterized, and it covers half of cell (1,1)
+    # so in binary mode the cell is True
+    expected = np.zeros_like(raster.values, dtype=bool)
+    expected[1, 1] = True
+
+    np.testing.assert_array_equal(raster.values, expected)
+
+
+def test_polygon_with_z_coordinate(grid):
+    # A polygon with a Z coordinate, covering half of cell (1,1)
+    poly = Polygon([(1, 1, 10), (1, 2, 20), (2, 1, 40), (1, 1, 10)])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="area")
+
+    # The Z coordinate should be ignored, area is 0.5
+    expected = np.zeros_like(raster.values, dtype=np.float32)
+    expected[1, 1] = 0.5
+
+    np.testing.assert_allclose(raster.values, expected, atol=1e-6)
 
 
 def test_lines_concatenation_length_mode(grid):
