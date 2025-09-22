@@ -71,66 +71,10 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    geom_type = types.Tuple(
-        (
-            types.float64[:, ::1],
-            types.ListType(types.float64[:, ::1]),
-        )
-    )
-    geoms_to_process = List.empty_list(geom_type)
-
     polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
+    num_polygons = len(polygons_proj)
 
-    exteriors = compute_exterior(polygons_proj)
-    interiors = compute_interiors(polygons_proj)
-
-    if exteriors.shape[0] > 0:
-        ext_boundaries = np.concatenate(
-            (
-                [0],
-                np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1,
-                [exteriors.shape[0]],
-            )
-        )
-
-        int_ring_boundaries = None
-        int_ring_poly_idx = None
-        if interiors.shape[0] > 0:
-            int_ids = interiors[:, :2]  # poly_idx, ring_idx
-            int_ring_boundaries = np.concatenate(
-                (
-                    [0],
-                    np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1,
-                    [int_ids.shape[0]],
-                )
-            )
-            int_ring_poly_idx = interiors[int_ring_boundaries[:-1], 0]
-
-        num_polygons = len(polygons_proj)
-        int_ring_cursor = 0
-        for i in tqdm(range(num_polygons), disable=not progress_bar):
-            ext_start, ext_end = ext_boundaries[i], ext_boundaries[i + 1]
-            exterior_coords = np.ascontiguousarray(exteriors[ext_start:ext_end, 1:3])
-
-            interior_coords_list = List.empty_list(types.float64[:, ::1])
-            if int_ring_boundaries is not None:
-                while (
-                    int_ring_cursor < len(int_ring_poly_idx)
-                    and int_ring_poly_idx[int_ring_cursor] == i
-                ):
-                    int_start, int_end = (
-                        int_ring_boundaries[int_ring_cursor],
-                        int_ring_boundaries[int_ring_cursor + 1],
-                    )
-                    interior_coords = np.ascontiguousarray(
-                        interiors[int_start:int_end, 2:4]
-                    )
-                    interior_coords_list.append(interior_coords)
-                    int_ring_cursor += 1
-
-            geoms_to_process.append((exterior_coords, interior_coords_list))
-
-    if not geoms_to_process:
+    if num_polygons == 0:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
@@ -138,8 +82,39 @@ def rasterize_polygons(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
+    exteriors = compute_exterior(polygons_proj)
+    interiors = compute_interiors(polygons_proj)
+
+    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3])
+    ext_boundaries = np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1
+    exteriors_offsets = np.concatenate(([0], ext_boundaries, [exteriors.shape[0]]))
+
+    interiors_coords = np.empty((0, 2), dtype=np.float64)
+    interiors_ring_offsets = np.array([0], dtype=np.intp)
+    interiors_poly_offsets = np.full(num_polygons + 1, 0, dtype=np.intp)
+
+    if interiors.shape[0] > 0:
+        interiors_coords = np.ascontiguousarray(interiors[:, 2:4])
+        int_ids = interiors[:, :2]
+        int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
+        interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))
+
+        int_ring_poly_idx = interiors[interiors_ring_offsets[:-1], 0].astype(np.intp)
+
+        # Create offsets for interiors per polygon. This finds the start index
+        # for each polygon's run of interior rings.
+        interiors_poly_offsets = np.searchsorted(
+            int_ring_poly_idx, np.arange(num_polygons + 1), side="left"
+        )
+
+
     raster_data_float = _rasterize_polygons_engine(
-        geoms_to_process,
+        num_polygons,
+        exteriors_coords,
+        exteriors_offsets,
+        interiors_coords,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
         x,
         y,
         dx,

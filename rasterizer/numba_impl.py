@@ -230,7 +230,12 @@ def _clip_polygon_numba(subject_coords, clip_box):
 
 @numba.jit(nopython=True, fastmath=True)
 def _rasterize_polygons_engine(
-    geoms,
+    num_polygons,
+    exteriors_coords,
+    exteriors_offsets,
+    interiors_coords,
+    interiors_ring_offsets,
+    interiors_poly_offsets,
     x,
     y,
     dx,
@@ -244,7 +249,10 @@ def _rasterize_polygons_engine(
     mode_is_binary,
 ):
     raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-    for exterior_coords, interior_coords_list in geoms:
+    for i in range(num_polygons):
+        ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
+        exterior_coords = exteriors_coords[ext_start:ext_end]
+
         poly_xmin, poly_ymin, poly_xmax, poly_ymax = (
             np.min(exterior_coords[:, 0]),
             np.min(exterior_coords[:, 1]),
@@ -276,19 +284,23 @@ def _rasterize_polygons_engine(
                 cell_ymax = y[iy] + half_dy
                 clip_box = (cell_xmin, cell_ymin, cell_xmax, cell_ymax)
 
-                # Clip exterior
                 clipped_exterior = _clip_polygon_numba(exterior_coords, clip_box)
                 area = _polygon_area_numba(clipped_exterior)
 
-                # Clip interiors (holes) and subtract their areas
-                if interior_coords_list:
-                    for interior_coords in interior_coords_list:
+                if interiors_poly_offsets.shape[0] > 0:
+                    poly_int_start = interiors_poly_offsets[i]
+                    poly_int_end = interiors_poly_offsets[i + 1]
+
+                    for j in range(poly_int_start, poly_int_end):
+                        int_start = interiors_ring_offsets[j]
+                        int_end = interiors_ring_offsets[j + 1]
+                        interior_coords = interiors_coords[int_start:int_end]
                         clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
                         area -= _polygon_area_numba(clipped_interior)
 
                 if area > 1e-9:
                     if mode_is_binary:
                         raster_data[iy, ix] = 1
-                    else:  # mode == "area"
+                    else:
                         raster_data[iy, ix] += area
     return raster_data
