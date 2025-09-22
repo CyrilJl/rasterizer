@@ -1,8 +1,6 @@
 import geopandas as gpd
 import numpy as np
 import xarray as xr
-from shapely.geometry import LineString, MultiLineString
-from tqdm.auto import tqdm
 
 from .numba_impl import _rasterize_lines_engine
 from .rasterizer import geocode
@@ -13,8 +11,7 @@ def rasterize_lines(
     x: np.ndarray,
     y: np.ndarray,
     crs,
-    mode="binary",
-    progress_bar=False,
+    mode: str = "binary",
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of LineString and MultiLineString on a regular grid.

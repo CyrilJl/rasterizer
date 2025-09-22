@@ -1,30 +1,33 @@
 import geopandas as gpd
 import numpy as np
 import xarray as xr
-from numba.core import types
-from numba.typed import List
-from shapely.geometry import MultiPolygon, Polygon
-from tqdm.auto import tqdm
 
 from .numba_impl import _rasterize_polygons_engine
 from .rasterizer import geocode
 
 
-def compute_exterior(gdf_poly):
-    ret = gdf_poly.geometry.exterior.get_coordinates().reset_index().values
-    return ret
+def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
+    """
+    Computes the exterior coordinates of a GeoDataFrame of polygons.
+    """
+    return gdf_poly.geometry.exterior.get_coordinates().reset_index().values
 
 
-def compute_interiors(gdf_poly):
+def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
+    """
+    Computes the interior coordinates of a GeoDataFrame of polygons.
+    """
     interiors = gdf_poly.geometry.interiors
     ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
+    if ret.empty:
+        return np.empty((0, 4), dtype=np.float64)
+
     temp_df = ret.reset_index()
     temp_df["sub_index"] = ret.groupby("index").cumcount()
     ret["sub_index"] = temp_df["sub_index"].values
 
     ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
-    ret = ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
-    return ret
+    return ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
 
 
 def rasterize_polygons(
@@ -32,8 +35,7 @@ def rasterize_polygons(
     x: np.ndarray,
     y: np.ndarray,
     crs,
-    mode="binary",
-    progress_bar=False,
+    mode: str = "binary",
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular grid.

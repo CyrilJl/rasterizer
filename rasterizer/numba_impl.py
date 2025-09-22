@@ -2,11 +2,20 @@ import math
 
 import numba
 import numpy as np
-from numba.typed import List
 
 
 @numba.jit(nopython=True, fastmath=True)
-def _clip_line_cohen_sutherland_numba(xa, ya, xb, yb, xmin, ymin, xmax, ymax):
+def _clip_line_cohen_sutherland_numba(
+    xa: float,
+    ya: float,
+    xb: float,
+    yb: float,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+) -> float:
+    """Clips a line to a rectangular box."""
     INSIDE, LEFT, RIGHT, BOTTOM, TOP = 0, 1, 2, 4, 8
 
     def compute_outcode(x, y):
@@ -70,19 +79,20 @@ def _clip_line_cohen_sutherland_numba(xa, ya, xb, yb, xmin, ymin, xmax, ymax):
 
 @numba.jit(nopython=True, fastmath=True)
 def _rasterize_lines_engine(
-    geoms,
-    x,
-    y,
-    dx,
-    dy,
-    half_dx,
-    half_dy,
-    x_grid_min,
-    x_grid_max,
-    y_grid_min,
-    y_grid_max,
-    mode_is_binary,
-):
+    geoms: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    dx: float,
+    dy: float,
+    half_dx: float,
+    half_dy: float,
+    x_grid_min: float,
+    x_grid_max: float,
+    y_grid_min: float,
+    y_grid_max: float,
+    mode_is_binary: bool,
+) -> np.ndarray:
+    """Rasterizes lines on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
     for i in range(len(geoms) - 1):
         # Check if the current and next points belong to the same line
@@ -147,7 +157,8 @@ def _rasterize_lines_engine(
 
 
 @numba.jit(nopython=True, fastmath=True)
-def _polygon_area_numba(coords):
+def _polygon_area_numba(coords: np.ndarray) -> float:
+    """Calculates the area of a polygon."""
     if len(coords) < 3:
         return 0.0
     area = 0.0
@@ -159,13 +170,14 @@ def _polygon_area_numba(coords):
 
 
 @numba.jit(nopython=True, fastmath=True)
-def _clip_polygon_numba(subject_coords, clip_box):
+def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarray:
+    """Clips a polygon to a rectangular box."""
     xmin, ymin, xmax, ymax = clip_box
 
     # Helper to clip against one edge of the clip box
     def clip_edge(coords, edge, value):
         # edge: 0 for left, 1 for right, 2 for bottom, 3 for top
-        output = List()
+        output = []
         if not len(coords):
             return np.empty((0, 2), dtype=np.float64)
 
@@ -230,24 +242,25 @@ def _clip_polygon_numba(subject_coords, clip_box):
 
 @numba.jit(nopython=True, fastmath=True)
 def _rasterize_polygons_engine(
-    num_polygons,
-    exteriors_coords,
-    exteriors_offsets,
-    interiors_coords,
-    interiors_ring_offsets,
-    interiors_poly_offsets,
-    x,
-    y,
-    dx,
-    dy,
-    half_dx,
-    half_dy,
-    x_grid_min,
-    x_grid_max,
-    y_grid_min,
-    y_grid_max,
-    mode_is_binary,
-):
+    num_polygons: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    dx: float,
+    dy: float,
+    half_dx: float,
+    half_dy: float,
+    x_grid_min: float,
+    x_grid_max: float,
+    y_grid_min: float,
+    y_grid_max: float,
+    mode_is_binary: bool,
+) -> np.ndarray:
+    """Rasterizes polygons on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
     for i in range(num_polygons):
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
