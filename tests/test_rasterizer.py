@@ -1,5 +1,6 @@
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import rioxarray
 from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
@@ -217,3 +218,63 @@ def test_polygon_invalid_mode(grid):
     gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
     with pytest.raises(ValueError, match="Mode must be 'binary' or 'area'"):
         rasterize_polygons(gdf, **grid, mode="invalid")
+
+
+def test_lines_concatenation_length_mode(grid):
+    # Two lines in different cells
+    line1 = LineString([(1.0, 1.0), (2.0, 2.0)])  # In cell (1,1)
+    line2 = LineString([(3.0, 3.0), (4.0, 4.0)])  # In cell (3,3)
+    gdf1 = gpd.GeoDataFrame([1], geometry=[line1], crs=CRS)
+    gdf2 = gpd.GeoDataFrame([1], geometry=[line2], crs=CRS)
+    gdf_concat = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
+
+    raster1 = rasterize_lines(gdf1, **grid, mode="length")
+    raster2 = rasterize_lines(gdf2, **grid, mode="length")
+    raster_concat = rasterize_lines(gdf_concat, **grid, mode="length")
+
+    np.testing.assert_allclose(raster_concat.values, raster1.values + raster2.values)
+
+
+def test_lines_concatenation_binary_mode(grid):
+    # Two lines in different cells
+    line1 = LineString([(0, 1.5), (10, 1.5)])  # Row 1
+    line2 = LineString([(2.5, 0), (2.5, 10)])  # Col 2
+    gdf1 = gpd.GeoDataFrame([1], geometry=[line1], crs=CRS)
+    gdf2 = gpd.GeoDataFrame([1], geometry=[line2], crs=CRS)
+    gdf_concat = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
+
+    raster1 = rasterize_lines(gdf1, **grid, mode="binary")
+    raster2 = rasterize_lines(gdf2, **grid, mode="binary")
+    raster_concat = rasterize_lines(gdf_concat, **grid, mode="binary")
+
+    np.testing.assert_array_equal(raster_concat.values, np.logical_or(raster1.values, raster2.values))
+
+
+def test_polygons_concatenation_area_mode(grid):
+    # Two polygons in different cells
+    poly1 = Polygon([(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)])  # Cell (1,1)
+    poly2 = Polygon([(3, 3), (3, 4), (4, 4), (4, 3), (3, 3)])  # Cell (3,3)
+    gdf1 = gpd.GeoDataFrame([1], geometry=[poly1], crs=CRS)
+    gdf2 = gpd.GeoDataFrame([1], geometry=[poly2], crs=CRS)
+    gdf_concat = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
+
+    raster1 = rasterize_polygons(gdf1, **grid, mode="area")
+    raster2 = rasterize_polygons(gdf2, **grid, mode="area")
+    raster_concat = rasterize_polygons(gdf_concat, **grid, mode="area")
+
+    np.testing.assert_allclose(raster_concat.values, raster1.values + raster2.values)
+
+
+def test_polygons_concatenation_binary_mode(grid):
+    # Two polygons in different cells
+    poly1 = Polygon([(1, 1), (1, 2), (2, 2), (2, 1), (1, 1)])  # Cell (1,1)
+    poly2 = Polygon([(3, 3), (3, 4), (4, 4), (4, 3), (3, 3)])  # Cell (3,3)
+    gdf1 = gpd.GeoDataFrame([1], geometry=[poly1], crs=CRS)
+    gdf2 = gpd.GeoDataFrame([1], geometry=[poly2], crs=CRS)
+    gdf_concat = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
+
+    raster1 = rasterize_polygons(gdf1, **grid, mode="binary")
+    raster2 = rasterize_polygons(gdf2, **grid, mode="binary")
+    raster_concat = rasterize_polygons(gdf_concat, **grid, mode="binary")
+
+    np.testing.assert_array_equal(raster_concat.values, np.logical_or(raster1.values, raster2.values))
