@@ -1,89 +1,30 @@
 import geopandas as gpd
 import numpy as np
 import xarray as xr
+from numba.core import types
+from numba.typed import List
 from shapely.geometry import MultiPolygon, Polygon
 from tqdm.auto import tqdm
 
+from .numba_impl import _rasterize_polygons_engine
 from .rasterizer import geocode
 
 
-def _polygon_area(coords):
-    """
-    Calculates the area of a polygon using the shoelace formula.
-    The coordinates must be a list of (x, y) tuples.
-    """
-    if len(coords) < 3:
-        return 0.0
-    area = 0.0
-    for i in range(len(coords)):
-        j = (i + 1) % len(coords)
-        area += coords[i][0] * coords[j][1]
-        area -= coords[j][0] * coords[i][1]
-    return abs(area) / 2.0
+def compute_exterior(gdf_poly):
+    ret = gdf_poly.geometry.exterior.get_coordinates().reset_index().values
+    return ret
 
 
-def _clip_polygon(subject_coords, clip_box):
-    """
-    Clips a polygon using the Sutherland-Hodgman algorithm against a rectangular box.
-    `subject_coords` is a list of (x, y) tuples.
-    `clip_box` is (xmin, ymin, xmax, ymax).
-    """
-    xmin, ymin, xmax, ymax = clip_box
-    clipped_coords = list(subject_coords)
+def compute_interiors(gdf_poly):
+    interiors = gdf_poly.geometry.interiors
+    ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
+    temp_df = ret.reset_index()
+    temp_df["sub_index"] = ret.groupby("index").cumcount()
+    ret["sub_index"] = temp_df["sub_index"].values
 
-    # Helper to clip against one edge of the clip box
-    def clip_edge(coords, edge, value):
-        # edge: 0 for left, 1 for right, 2 for bottom, 3 for top
-        output = []
-        if not coords:
-            return output
-
-        p1 = coords[-1]
-        for p2 in coords:
-            if edge == 0:  # left
-                p1_inside = p1[0] >= value
-                p2_inside = p2[0] >= value
-            elif edge == 1:  # right
-                p1_inside = p1[0] <= value
-                p2_inside = p2[0] <= value
-            elif edge == 2:  # bottom
-                p1_inside = p1[1] >= value
-                p2_inside = p2[1] >= value
-            else:  # top
-                p1_inside = p1[1] <= value
-                p2_inside = p2[1] <= value
-
-            if p2_inside:
-                if not p1_inside:  # p1 outside, p2 inside -> intersection
-                    # calculate intersection
-                    if edge < 2:  # vertical edge (left/right)
-                        ix = value
-                        iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                        output.append((ix, iy))
-                    else:  # horizontal edge (bottom/top)
-                        iy = value
-                        ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                        output.append((ix, iy))
-                output.append(p2)
-            elif p1_inside:  # p1 inside, p2 outside -> intersection
-                # calculate intersection
-                if edge < 2:  # vertical edge
-                    ix = value
-                    iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                    output.append((ix, iy))
-                else:  # horizontal edge
-                    iy = value
-                    ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                    output.append((ix, iy))
-            p1 = p2
-        return output
-
-    clipped_coords = clip_edge(clipped_coords, 0, xmin)  # left
-    clipped_coords = clip_edge(clipped_coords, 1, xmax)  # right
-    clipped_coords = clip_edge(clipped_coords, 2, ymin)  # bottom
-    clipped_coords = clip_edge(clipped_coords, 3, ymax)  # top
-
-    return clipped_coords
+    ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
+    ret = ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
+    return ret
 
 
 def rasterize_polygons(
@@ -114,14 +55,12 @@ def rasterize_polygons(
 
     polygons_proj = polygons.to_crs(crs)
 
-    if mode == "binary":
-        raster_data = np.full((len(y), len(x)), False, dtype=bool)
-    else:
-        raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-
-    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-
     if polygons_proj.empty or len(x) < 2 or len(y) < 2:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
     dx = x[1] - x[0]
@@ -132,60 +71,68 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    for geom in tqdm(polygons_proj.geometry, disable=not progress_bar):
-        geoms_to_process = []
-        if isinstance(geom, MultiPolygon):
-            geoms_to_process.extend(list(geom.geoms))
-        elif isinstance(geom, Polygon):
-            geoms_to_process.append(geom)
+    polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
+    num_polygons = len(polygons_proj)
 
-        for poly in geoms_to_process:
-            poly_xmin, poly_ymin, poly_xmax, poly_ymax = poly.bounds
+    if num_polygons == 0:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
+        return geocode(raster, "x", "y", crs)
 
-            if (
-                poly_xmax < x_grid_min
-                or poly_xmin > x_grid_max
-                or poly_ymax < y_grid_min
-                or poly_ymin > y_grid_max
-            ):
-                continue
+    exteriors = compute_exterior(polygons_proj)
+    interiors = compute_interiors(polygons_proj)
 
-            ix_start = np.searchsorted(x, poly_xmin - half_dx, side="left")
-            ix_end = np.searchsorted(x, poly_xmax + half_dx, side="right")
-            iy_start = np.searchsorted(y, poly_ymin - half_dy, side="left")
-            iy_end = np.searchsorted(y, poly_ymax + half_dy, side="right")
+    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3])
+    ext_boundaries = np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1
+    exteriors_offsets = np.concatenate(([0], ext_boundaries, [exteriors.shape[0]]))
 
-            ix_start = max(0, ix_start)
-            iy_start = max(0, iy_start)
-            ix_end = min(len(x), ix_end)
-            iy_end = min(len(y), iy_end)
+    interiors_coords = np.empty((0, 2), dtype=np.float64)
+    interiors_ring_offsets = np.array([0], dtype=np.intp)
+    interiors_poly_offsets = np.full(num_polygons + 1, 0, dtype=np.intp)
 
-            for iy in range(iy_start, iy_end):
-                for ix in range(ix_start, ix_end):
-                    if raster.values[iy, ix] and mode == "binary":
-                        continue
+    if interiors.shape[0] > 0:
+        interiors_coords = np.ascontiguousarray(interiors[:, 2:4])
+        int_ids = interiors[:, :2]
+        int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
+        interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))
 
-                    cell_xmin = x[ix] - half_dx
-                    cell_xmax = x[ix] + half_dx
-                    cell_ymin = y[iy] - half_dy
-                    cell_ymax = y[iy] + half_dy
-                    clip_box = (cell_xmin, cell_ymin, cell_xmax, cell_ymax)
+        int_ring_poly_idx = interiors[interiors_ring_offsets[:-1], 0].astype(np.intp)
 
-                    # Clip exterior
-                    exterior_coords = list(poly.exterior.coords)
-                    clipped_exterior = _clip_polygon(exterior_coords, clip_box)
-                    area = _polygon_area(clipped_exterior)
+        # Create offsets for interiors per polygon. This finds the start index
+        # for each polygon's run of interior rings.
+        interiors_poly_offsets = np.searchsorted(
+            int_ring_poly_idx, np.arange(num_polygons + 1), side="left"
+        )
 
-                    # Clip interiors (holes) and subtract their areas
-                    for interior in poly.interiors:
-                        interior_coords = list(interior.coords)
-                        clipped_interior = _clip_polygon(interior_coords, clip_box)
-                        area -= _polygon_area(clipped_interior)
 
-                    if area > 1e-9:
-                        if mode == "binary":
-                            raster.values[iy, ix] = True
-                        else:  # mode == "area"
-                            raster.values[iy, ix] += area
+    raster_data_float = _rasterize_polygons_engine(
+        num_polygons,
+        exteriors_coords,
+        exteriors_offsets,
+        interiors_coords,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
+        x,
+        y,
+        dx,
+        dy,
+        half_dx,
+        half_dy,
+        x_grid_min,
+        x_grid_max,
+        y_grid_min,
+        y_grid_max,
+        mode == "binary",
+    )
+
+    if mode == "binary":
+        raster_data = raster_data_float.astype(bool)
+    else:
+        raster_data = raster_data_float
+
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
     return geocode(raster, "x", "y", crs)
