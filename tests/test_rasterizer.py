@@ -1,9 +1,12 @@
+import random
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import rioxarray
-from shapely.geometry import LineString, MultiLineString, Polygon, MultiPolygon
+from scipy.spatial import ConvexHull
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
 
 from rasterizer import rasterize_lines, rasterize_polygons
 
@@ -278,3 +281,120 @@ def test_polygons_concatenation_binary_mode(grid):
     raster_concat = rasterize_polygons(gdf_concat, **grid, mode="binary")
 
     np.testing.assert_array_equal(raster_concat.values, np.logical_or(raster1.values, raster2.values))
+
+
+# Helper functions for stress tests
+
+def generate_random_linestrings(n, x_range, y_range, max_points=10):
+    linestrings = []
+    for _ in range(n):
+        num_points = random.randint(2, max_points)
+        points = []
+        for _ in range(num_points):
+            points.append(
+                (random.uniform(*x_range), random.uniform(*y_range))
+            )
+        linestrings.append(LineString(points))
+    return linestrings
+
+
+def generate_random_multilinestrings(n, x_range, y_range, max_lines=5, max_points=10):
+    multilinestrings = []
+    for _ in range(n):
+        num_lines = random.randint(1, max_lines)
+        lines = []
+        for _ in range(num_lines):
+            num_points = random.randint(2, max_points)
+            points = []
+            for _ in range(num_points):
+                points.append(
+                    (random.uniform(*x_range), random.uniform(*y_range))
+                )
+            lines.append(LineString(points))
+        multilinestrings.append(MultiLineString(lines))
+    return multilinestrings
+
+
+def generate_random_polygons(n, x_range, y_range, max_points=15, with_interiors_fraction=0.1):
+    polygons = []
+    for i in range(n):
+        num_points = random.randint(5, max_points)
+        points = np.random.rand(num_points, 2)
+        points[:, 0] = points[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
+        points[:, 1] = points[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
+
+        try:
+            hull = ConvexHull(points)
+            exterior = points[hull.vertices]
+            poly = Polygon(exterior)
+        except Exception:
+            # ConvexHull can fail with collinear points, just skip this one
+            continue
+
+        if i < n * with_interiors_fraction:
+            # Create a smaller polygon for the interior
+            interior_points = poly.centroid.coords[0] + (points - poly.centroid.coords[0]) * 0.5
+            try:
+                interior_hull = ConvexHull(interior_points)
+                interior = interior_points[interior_hull.vertices]
+                if Polygon(interior).is_valid:
+                    poly = Polygon(exterior, [interior])
+            except Exception:
+                pass # It may fail, just use the exterior
+
+        polygons.append(poly)
+    return polygons
+
+
+def generate_random_multipolygons(n, x_range, y_range, max_polys=5, max_points=15):
+    multipolygons = []
+    for _ in range(n):
+        num_polys = random.randint(1, max_polys)
+        polys = generate_random_polygons(num_polys, x_range, y_range, max_points, with_interiors_fraction=0.0)
+        multipolygons.append(MultiPolygon(polys))
+    return multipolygons
+
+# Stress tests
+
+def test_rasterize_lines_stress():
+    n_samples_lines = 10000
+    n_samples_multilines = 2500
+    x_range = (0, 100)
+    y_range = (0, 100)
+
+    lines = generate_random_linestrings(n_samples_lines, x_range, y_range)
+    mlines = generate_random_multilinestrings(n_samples_multilines, x_range, y_range)
+
+    gdf = gpd.GeoDataFrame(geometry=lines + mlines, crs=CRS)
+
+    xmin, ymin, xmax, ymax = gdf.total_bounds
+    x = np.arange(xmin, xmax, 1.0)
+    y = np.arange(ymin, ymax, 1.0)
+
+    raster_len = rasterize_lines(gdf, x=x, y=y, crs=CRS, mode="length")
+    assert raster_len.sum() > 0
+
+    raster_bin = rasterize_lines(gdf, x=x, y=y, crs=CRS, mode="binary")
+    assert raster_bin.sum() > 0
+
+
+def test_rasterize_polygons_stress():
+    n_samples_polys = 1000
+    n_samples_multipolys = 250
+    x_range = (0, 100)
+    y_range = (0, 100)
+
+    polys = generate_random_polygons(n_samples_polys, x_range, y_range)
+    mpolys = generate_random_multipolygons(n_samples_multipolys, x_range, y_range)
+
+    gdf = gpd.GeoDataFrame(geometry=polys + mpolys, crs=CRS)
+
+    xmin, ymin, xmax, ymax = gdf.total_bounds
+    x = np.arange(xmin, xmax, 1.0)
+    y = np.arange(ymin, ymax, 1.0)
+
+    raster_area = rasterize_polygons(gdf, x=x, y=y, crs=CRS, mode="area")
+    assert raster_area.sum() > 0
+
+    raster_bin = rasterize_polygons(gdf, x=x, y=y, crs=CRS, mode="binary")
+    assert raster_bin.sum() > 0

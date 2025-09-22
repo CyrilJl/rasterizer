@@ -20,7 +20,7 @@ def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     interiors = gdf_poly.geometry.interiors
     ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
     if ret.empty:
-        return np.empty((0, 4), dtype=np.float64)
+        return np.empty((0, 4), dtype=np.float32)
 
     temp_df = ret.reset_index()
     temp_df["sub_index"] = ret.groupby("index").cumcount()
@@ -35,7 +35,7 @@ def rasterize_polygons(
     x: np.ndarray,
     y: np.ndarray,
     crs,
-    mode: str = "binary",
+    mode: str = "area",
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular grid.
@@ -45,7 +45,7 @@ def rasterize_polygons(
         x (np.ndarray): 1D array of x-coordinates of the cell centers.
         y (np.ndarray): 1D array of y-coordinates of the cell centers.
         crs: The coordinate reference system of the output grid.
-        mode (str, optional): 'binary' or 'area'. Defaults to 'binary'.
+        mode (str, optional): 'binary' or 'area'. Defaults to 'area'.
             - 'binary': the cell is True if covered, False otherwise.
             - 'area': the cell contains the area of the polygon that covers it.
 
@@ -87,16 +87,16 @@ def rasterize_polygons(
     exteriors = compute_exterior(polygons_proj)
     interiors = compute_interiors(polygons_proj)
 
-    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3])
+    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3]).astype(np.float32)
     ext_boundaries = np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1
     exteriors_offsets = np.concatenate(([0], ext_boundaries, [exteriors.shape[0]]))
 
-    interiors_coords = np.empty((0, 2), dtype=np.float64)
+    interiors_coords = np.empty((0, 2), dtype=np.float32)
     interiors_ring_offsets = np.array([0], dtype=np.intp)
     interiors_poly_offsets = np.full(num_polygons + 1, 0, dtype=np.intp)
 
     if interiors.shape[0] > 0:
-        interiors_coords = np.ascontiguousarray(interiors[:, 2:4])
+        interiors_coords = np.ascontiguousarray(interiors[:, 2:4]).astype(np.float32)
         int_ids = interiors[:, :2]
         int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
         interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))
@@ -119,8 +119,6 @@ def rasterize_polygons(
         interiors_poly_offsets,
         x,
         y,
-        dx,
-        dy,
         half_dx,
         half_dy,
         x_grid_min,
