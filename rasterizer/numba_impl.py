@@ -179,7 +179,7 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
         # edge: 0 for left, 1 for right, 2 for bottom, 3 for top
         output = []
         if not len(coords):
-            return np.empty((0, 2), dtype=np.float64)
+            return np.empty((0, 2), dtype=np.float32)
 
         p1 = coords[-1]
         for p2_idx in range(len(coords)):
@@ -203,29 +203,29 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
                     if edge < 2:  # vertical edge (left/right)
                         ix = value
                         iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                        output.append(np.array([ix, iy]))
+                        output.append(np.array([ix, iy], dtype=np.float32))
                     else:  # horizontal edge (bottom/top)
                         iy = value
                         ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                        output.append(np.array([ix, iy]))
+                        output.append(np.array([ix, iy], dtype=np.float32))
                 output.append(p2)
             elif p1_inside:  # p1 inside, p2 outside -> intersection
                 # calculate intersection
                 if edge < 2:  # vertical edge
                     ix = value
                     iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                    output.append(np.array([ix, iy]))
+                    output.append(np.array([ix, iy], dtype=np.float32))
                 else:  # horizontal edge
                     iy = value
                     ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                    output.append(np.array([ix, iy]))
+                    output.append(np.array([ix, iy], dtype=np.float32))
             p1 = p2
 
         if not output:
-            return np.empty((0, 2), dtype=np.float64)
+            return np.empty((0, 2), dtype=np.float32)
 
         # Manual vstack
-        res = np.empty((len(output), 2), dtype=np.float64)
+        res = np.empty((len(output), 2), dtype=np.float32)
         for i, arr in enumerate(output):
             res[i, 0] = arr[0]
             res[i, 1] = arr[1]
@@ -250,8 +250,6 @@ def _rasterize_polygons_engine(
     interiors_poly_offsets: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
-    dx: float,
-    dy: float,
     half_dx: float,
     half_dy: float,
     x_grid_min: float,

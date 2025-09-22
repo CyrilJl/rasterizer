@@ -11,7 +11,7 @@ def rasterize_lines(
     x: np.ndarray,
     y: np.ndarray,
     crs,
-    mode: str = "binary",
+    mode: str = "length",
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of LineString and MultiLineString on a regular grid.
@@ -21,7 +21,7 @@ def rasterize_lines(
         x (np.ndarray): 1D array of x-coordinates of the cell centers.
         y (np.ndarray): 1D array of y-coordinates of the cell centers.
         crs: The coordinate reference system of the output grid.
-        mode (str, optional): 'binary' or 'length'. Defaults to 'binary'.
+        mode (str, optional): 'binary' or 'length'. Defaults to 'length'.
             - 'binary': the cell is True if crossed, False otherwise.
             - 'length': the cell contains the total length of the line segments.
 
@@ -54,7 +54,7 @@ def rasterize_lines(
         .reset_index(drop=True)
         .get_coordinates()
         .reset_index()
-        .values
+        .values.astype(np.float32)
     )
 
     raster_data_float = _rasterize_lines_engine(
