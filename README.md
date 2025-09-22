@@ -4,7 +4,7 @@
 
 This package provides functionalities that are not present in `rasterio.features`, such as area and length-based rasterization. It is also lighter and faster than using GDAL-based solutions.
 
-For detailed usage and API documentation, please see the [full documentation](https://rasterizer.readthedocs.io).
+For detailed usage and API documentation, including real-world examples, please see the [full documentation](https://rasterizer.readthedocs.io).
 
 ## Features
 
