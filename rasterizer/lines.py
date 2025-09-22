@@ -31,6 +31,12 @@ def rasterize_lines(
     if mode not in ["binary", "length"]:
         raise ValueError("Mode must be 'binary' or 'length'")
 
+    lines = lines.copy()
+    lines.geometry = lines.geometry.force_2d()
+
+    geom_types = lines.geometry.geom_type
+    lines = lines[geom_types.isin(["LineString", "MultiLineString"])]
+
     lines_proj = lines.to_crs(crs)
 
     if lines_proj.empty or len(x) < 2 or len(y) < 2:
