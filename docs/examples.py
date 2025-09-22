@@ -1,10 +1,14 @@
-import geopandas as gpd
-import numpy as np
-import rasterizer
-import matplotlib.pyplot as plt
 import os
-import wget
 import zipfile
+
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+import wget
+from mapflow import plot_da
+
+import rasterizer
+
 
 def download_and_unzip(url, target_dir):
     """Downloads and unzips a file."""
@@ -18,8 +22,9 @@ def download_and_unzip(url, target_dir):
         wget.download(url, out=zip_path)
 
     print(f"Unzipping {zip_path}...")
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(target_dir)
+
 
 def main():
     # --- Data URLs ---
@@ -41,27 +46,30 @@ def main():
     if not os.path.exists("docs/_static"):
         os.makedirs("docs/_static")
 
+    resolution = 1000.0  # in meters
+
     # Rasterize and plot roads
     roads = gpd.read_file(roads_shapefile)
-    x_roads = np.linspace(roads.total_bounds[0], roads.total_bounds[2], 500)
-    y_roads = np.linspace(roads.total_bounds[1], roads.total_bounds[3], 500)
+    x_roads = np.arange(roads.total_bounds[0], roads.total_bounds[2], resolution)
+    y_roads = np.arange(roads.total_bounds[1], roads.total_bounds[3], resolution)
     raster_roads = rasterizer.rasterize_lines(roads, x_roads, y_roads, crs=roads.crs)
 
-    raster_roads.plot(figsize=(10, 10))
-    plt.title("Roads")
-    plt.savefig("docs/_static/roads_raster.png")
+    plot_da(raster_roads, title=f"Roads - {resolution}x{resolution} raster", figsize=(10, 10), log=True, show=False)
+    plt.tight_layout()
+    plt.savefig("docs/_static/roads_raster.png", bbox_inches="tight")
     plt.close()
 
     # Rasterize and plot land use
     land_use = gpd.read_file(land_use_shapefile)
-    x_lu = np.linspace(land_use.total_bounds[0], land_use.total_bounds[2], 500)
-    y_lu = np.linspace(land_use.total_bounds[1], land_use.total_bounds[3], 500)
+    x_lu = np.arange(land_use.total_bounds[0], land_use.total_bounds[2], resolution)
+    y_lu = np.arange(land_use.total_bounds[1], land_use.total_bounds[3], resolution)
     raster_lu = rasterizer.rasterize_polygons(land_use, x_lu, y_lu, crs=land_use.crs)
 
-    raster_lu.plot(figsize=(10, 10))
-    plt.title("Land Use")
-    plt.savefig("docs/_static/land_use_raster.png")
+    plot_da(raster_lu, title=f"Land Use - {resolution}x{resolution} raster", figsize=(10, 10), log=True, show=False)
+    plt.tight_layout()
+    plt.savefig("docs/_static/roads_raster.png", bbox_inches="tight")
     plt.close()
+
 
 if __name__ == "__main__":
     main()
