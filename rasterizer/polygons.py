@@ -10,6 +10,23 @@ from .numba_impl import _rasterize_polygons_engine
 from .rasterizer import geocode
 
 
+def compute_exterior(gdf_poly):
+    ret = gdf_poly.geometry.exterior.get_coordinates().reset_index().values
+    return ret
+
+
+def compute_interiors(gdf_poly):
+    interiors = gdf_poly.geometry.interiors
+    ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
+    temp_df = ret.reset_index()
+    temp_df["sub_index"] = ret.groupby("index").cumcount()
+    ret["sub_index"] = temp_df["sub_index"].values
+
+    ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
+    ret = ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
+    return ret
+
+
 def rasterize_polygons(
     polygons: gpd.GeoDataFrame,
     x: np.ndarray,
@@ -54,29 +71,10 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    geom_type = types.Tuple(
-        (
-            types.float64[:, ::1],
-            types.ListType(types.float64[:, ::1]),
-        )
-    )
-    geoms_to_process = List.empty_list(geom_type)
+    polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
+    num_polygons = len(polygons_proj)
 
-    for geom in tqdm(polygons_proj.geometry, disable=not progress_bar):
-        geoms = []
-        if isinstance(geom, MultiPolygon):
-            geoms.extend(list(geom.geoms))
-        elif isinstance(geom, Polygon):
-            geoms.append(geom)
-
-        for poly in geoms:
-            exterior_coords = np.ascontiguousarray(poly.exterior.coords)
-            interior_coords_list = List.empty_list(types.float64[:, ::1])
-            for interior in poly.interiors:
-                interior_coords_list.append(np.ascontiguousarray(interior.coords))
-            geoms_to_process.append((exterior_coords, interior_coords_list))
-
-    if not geoms_to_process:
+    if num_polygons == 0:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
@@ -84,8 +82,39 @@ def rasterize_polygons(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
+    exteriors = compute_exterior(polygons_proj)
+    interiors = compute_interiors(polygons_proj)
+
+    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3])
+    ext_boundaries = np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1
+    exteriors_offsets = np.concatenate(([0], ext_boundaries, [exteriors.shape[0]]))
+
+    interiors_coords = np.empty((0, 2), dtype=np.float64)
+    interiors_ring_offsets = np.array([0], dtype=np.intp)
+    interiors_poly_offsets = np.full(num_polygons + 1, 0, dtype=np.intp)
+
+    if interiors.shape[0] > 0:
+        interiors_coords = np.ascontiguousarray(interiors[:, 2:4])
+        int_ids = interiors[:, :2]
+        int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
+        interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))
+
+        int_ring_poly_idx = interiors[interiors_ring_offsets[:-1], 0].astype(np.intp)
+
+        # Create offsets for interiors per polygon. This finds the start index
+        # for each polygon's run of interior rings.
+        interiors_poly_offsets = np.searchsorted(
+            int_ring_poly_idx, np.arange(num_polygons + 1), side="left"
+        )
+
+
     raster_data_float = _rasterize_polygons_engine(
-        geoms_to_process,
+        num_polygons,
+        exteriors_coords,
+        exteriors_offsets,
+        interiors_coords,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
         x,
         y,
         dx,
