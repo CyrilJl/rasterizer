@@ -63,7 +63,7 @@ def rasterize_polygons(
 
     polygons_proj = polygons.to_crs(crs)
 
-    if polygons_proj.empty or len(x) < 2 or len(y) < 2:
+    if len(x) < 2 or len(y) < 2:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
@@ -78,6 +78,16 @@ def rasterize_polygons(
 
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
+
+    polygons_proj = polygons_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
+
+    if polygons_proj.empty:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
+        return geocode(raster, "x", "y", crs)
 
     polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
     num_polygons = len(polygons_proj)

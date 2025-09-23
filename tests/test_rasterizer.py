@@ -282,6 +282,28 @@ def test_polygon_with_z_coordinate(grid):
     np.testing.assert_allclose(raster.values, expected, atol=1e-6)
 
 
+def test_clipping(grid):
+    # Test for lines
+    # A line that extends beyond the grid boundaries
+    line = LineString([(-5, 5.5), (15, 5.5)])
+    gdf = gpd.GeoDataFrame([1], geometry=[line], crs=CRS)
+
+    raster = rasterize_lines(gdf, **grid, mode="length")
+    # The grid is from 0 to 10. The line is from -5 to 15.
+    # The clipped line should be from 0 to 10. Length is 10.
+    assert np.isclose(raster.values.sum(), 10.0)
+
+    # Test for polygons
+    # A polygon that extends beyond the grid boundaries
+    poly = Polygon([(-5, 0), (-5, 10), (15, 10), (15, 0), (-5, 0)])
+    gdf = gpd.GeoDataFrame([1], geometry=[poly], crs=CRS)
+
+    raster = rasterize_polygons(gdf, **grid, mode="area")
+    # The grid is from 0 to 10 on both axes.
+    # The clipped polygon should be from 0 to 10. Area is 100.
+    assert np.isclose(raster.values.sum(), 100.0)
+
+
 def test_lines_concatenation_length_mode(grid):
     # Two lines in different cells
     line1 = LineString([(1.0, 1.0), (2.0, 2.0)])  # In cell (1,1)
