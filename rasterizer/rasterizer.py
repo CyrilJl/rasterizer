@@ -1,4 +1,5 @@
 import xarray as xr
+import rioxarray
 
 
 def geocode(ds: xr.DataArray, x_name: str, y_name: str, crs) -> xr.DataArray:
