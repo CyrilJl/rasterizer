@@ -39,7 +39,7 @@ def rasterize_lines(
 
     lines_proj = lines.to_crs(crs)
 
-    if lines_proj.empty or len(x) < 2 or len(y) < 2:
+    if len(x) < 2 or len(y) < 2:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
@@ -54,6 +54,16 @@ def rasterize_lines(
 
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
+
+    lines_proj = lines_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
+
+    if lines_proj.empty:
+        if mode == "binary":
+            raster_data = np.full((len(y), len(x)), False, dtype=bool)
+        else:
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
+        return geocode(raster, "x", "y", crs)
 
     geoms_to_process = (
         lines_proj.explode(index_parts=True)
