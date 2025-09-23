@@ -6,7 +6,13 @@ import pandas as pd
 import pytest
 import rioxarray
 from scipy.spatial import ConvexHull
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
+from shapely.geometry import (
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Polygon,
+    box,
+)
 
 from rasterizer import rasterize_lines, rasterize_polygons
 
@@ -479,3 +485,53 @@ def test_rasterize_polygons_stress():
 
     raster_bin = rasterize_polygons(gdf, x=x, y=y, crs=CRS, mode="binary")
     assert raster_bin.sum() > 0
+
+
+def test_rasterize_with_geopandas_overlay():
+    # Define a small grid
+    x = np.arange(0.5, 4.5, 1.0)
+    y = np.arange(0.5, 4.5, 1.0)
+    dx = x[1] - x[0]
+    dy = y[1] - y[0]
+    crs = "EPSG:32631"
+
+    # Create a GeoDataFrame for the grid cells
+    grid_cells = []
+    for i, yi in enumerate(y):
+        for j, xi in enumerate(x):
+            grid_cells.append({
+                'geometry': box(xi - dx / 2, yi - dy / 2, xi + dx / 2, yi + dy / 2),
+                'row': i,
+                'col': j
+            })
+    gdf_grid = gpd.GeoDataFrame(grid_cells, crs=crs)
+
+    # Test with a polygon
+    poly = Polygon([(1, 1), (1, 3), (3, 3), (3, 1), (1, 1)])
+    gdf_poly = gpd.GeoDataFrame([1], geometry=[poly], crs=crs)
+
+    # Calculate intersection with geopandas
+    overlay = gpd.overlay(gdf_grid, gdf_poly, how='intersection')
+    overlay['area'] = overlay.geometry.area
+    expected_areas = overlay.groupby(['row', 'col'])['area'].sum().unstack(fill_value=0).values
+
+    # Rasterize using the library
+    raster = rasterize_polygons(gdf_poly, x=x, y=y, crs=crs, mode='area')
+
+    # Compare results
+    np.testing.assert_allclose(expected_areas, raster.values, atol=1e-6)
+
+    # Test with a line
+    line = LineString([(0.5, 0.5), (3.5, 3.5)])
+    gdf_line = gpd.GeoDataFrame([1], geometry=[line], crs=crs)
+
+    # Calculate intersection with geopandas
+    overlay = gpd.overlay(gdf_grid, gdf_line, how='intersection')
+    overlay['length'] = overlay.geometry.length
+    expected_lengths = overlay.groupby(['row', 'col'])['length'].sum().unstack(fill_value=0).values
+
+    # Rasterize using the library
+    raster = rasterize_lines(gdf_line, x=x, y=y, crs=crs, mode='length')
+
+    # Compare results
+    np.testing.assert_allclose(expected_lengths, raster.values, atol=1e-6)
