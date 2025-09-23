@@ -4,7 +4,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
-import rioxarray
 from scipy.spatial import ConvexHull
 from shapely.geometry import (
     LineString,
