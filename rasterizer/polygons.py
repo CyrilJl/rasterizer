@@ -18,9 +18,7 @@ def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     Computes the interior coordinates of a GeoDataFrame of polygons.
     """
     interiors = gdf_poly.geometry.interiors
-    ret = (
-        interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
-    )
+    ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
     if ret.empty:
         return np.empty((0, 4), dtype=np.float32)
 
@@ -116,24 +114,14 @@ def rasterize_polygons(
     if interiors.shape[0] > 0:
         interiors_coords = np.ascontiguousarray(interiors[:, 2:4]).astype(np.float32)
         int_ids = interiors[:, :2]
-        int_ring_boundaries = (
-            np.where(
-                (int_ids[:-1, 0] != int_ids[1:, 0])
-                | (int_ids[:-1, 1] != int_ids[1:, 1])
-            )[0]
-            + 1
-        )
-        interiors_ring_offsets = np.concatenate(
-            ([0], int_ring_boundaries, [int_ids.shape[0]])
-        )
+        int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
+        interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))
 
         int_ring_poly_idx = interiors[interiors_ring_offsets[:-1], 0].astype(np.intp)
 
         # Create offsets for interiors per polygon. This finds the start index
         # for each polygon's run of interior rings.
-        interiors_poly_offsets = np.searchsorted(
-            int_ring_poly_idx, np.arange(num_polygons + 1), side="left"
-        )
+        interiors_poly_offsets = np.searchsorted(int_ring_poly_idx, np.arange(num_polygons + 1), side="left")
 
     raster_data_float = _rasterize_polygons_engine(
         num_polygons,
