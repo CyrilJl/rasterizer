@@ -6,7 +6,13 @@ import pandas as pd
 import pytest
 import rioxarray
 from scipy.spatial import ConvexHull
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
+from shapely.geometry import (
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Polygon,
+    box,
+)
 
 from rasterizer import rasterize_lines, rasterize_polygons
 
@@ -366,15 +372,14 @@ def test_polygons_concatenation_binary_mode(grid):
 
 # Helper functions for stress tests
 
+
 def generate_random_linestrings(n, x_range, y_range, max_points=10):
     linestrings = []
     for _ in range(n):
         num_points = random.randint(2, max_points)
         points = []
         for _ in range(num_points):
-            points.append(
-                (random.uniform(*x_range), random.uniform(*y_range))
-            )
+            points.append((random.uniform(*x_range), random.uniform(*y_range)))
         linestrings.append(LineString(points))
     return linestrings
 
@@ -388,9 +393,7 @@ def generate_random_multilinestrings(n, x_range, y_range, max_lines=5, max_point
             num_points = random.randint(2, max_points)
             points = []
             for _ in range(num_points):
-                points.append(
-                    (random.uniform(*x_range), random.uniform(*y_range))
-                )
+                points.append((random.uniform(*x_range), random.uniform(*y_range)))
             lines.append(LineString(points))
         multilinestrings.append(MultiLineString(lines))
     return multilinestrings
@@ -421,7 +424,7 @@ def generate_random_polygons(n, x_range, y_range, max_points=15, with_interiors_
                 if Polygon(interior).is_valid:
                     poly = Polygon(exterior, [interior])
             except Exception:
-                pass # It may fail, just use the exterior
+                pass  # It may fail, just use the exterior
 
         polygons.append(poly)
     return polygons
@@ -435,7 +438,9 @@ def generate_random_multipolygons(n, x_range, y_range, max_polys=5, max_points=1
         multipolygons.append(MultiPolygon(polys))
     return multipolygons
 
+
 # Stress tests
+
 
 def test_rasterize_lines_stress():
     n_samples_lines = 10000
@@ -479,3 +484,60 @@ def test_rasterize_polygons_stress():
 
     raster_bin = rasterize_polygons(gdf, x=x, y=y, crs=CRS, mode="binary")
     assert raster_bin.sum() > 0
+
+
+def test_rasterize_with_geopandas_overlay():
+    # Define a small grid
+    x = np.arange(0.5, 4.5, 0.2)
+    y = np.arange(0.5, 4.5, 0.2)
+    dx = x[1] - x[0]
+    dy = y[1] - y[0]
+    crs = "EPSG:32631"
+
+    # Create a GeoDataFrame for the grid cells
+    grid_cells = []
+    for i, yi in enumerate(y):
+        for j, xi in enumerate(x):
+            grid_cells.append(
+                {
+                    "geometry": box(xi - dx / 2, yi - dy / 2, xi + dx / 2, yi + dy / 2),
+                    "row": i,
+                    "col": j,
+                }
+            )
+    gdf_grid = gpd.GeoDataFrame(grid_cells, crs=crs)
+    index = ["row", "col"]
+
+    # Test with a polygon
+    poly = Polygon([(0, 1), (1, 3), (2, 3), (4, 1), (1, 1)])
+    gdf_poly = gpd.GeoDataFrame([1], geometry=[poly], crs=crs)
+
+    # Calculate intersection with geopandas
+    overlay = gpd.overlay(gdf_grid, gdf_poly, how="intersection")
+    overlay["area"] = overlay.geometry.area
+    expected_areas = overlay.groupby(index)["area"].sum().reset_index()
+    expected_areas = expected_areas.merge(gdf_grid[index], left_on=index, right_on=index, how="right")
+    expected_areas = expected_areas.fillna(0)["area"].values.reshape((len(y), len(x)))
+
+    # Rasterize using the library
+    raster = rasterize_polygons(gdf_poly, x=x, y=y, crs=crs, mode="area")
+
+    # Compare results
+    np.testing.assert_allclose(expected_areas, raster.values, atol=1e-6)
+
+    # Test with a line
+    line = LineString([(0.5, 0.5), (3.5, 3.5), (2.3, 1 + 1 / 3)])
+    gdf_line = gpd.GeoDataFrame([1], geometry=[line], crs=crs)
+
+    # Calculate intersection with geopandas
+    overlay = gpd.overlay(gdf_grid, gdf_line, how="intersection", keep_geom_type=False)
+    overlay["length"] = overlay.geometry.length
+    expected_length = overlay.groupby(index)["length"].sum().reset_index()
+    expected_length = expected_length.merge(gdf_grid[index], left_on=index, right_on=index, how="right")
+    expected_length = expected_length.fillna(0)["length"].values.reshape((len(y), len(x)))
+
+    # Rasterize using the library
+    raster = rasterize_lines(gdf_line, x=x, y=y, crs=crs, mode="length")
+
+    # Compare results
+    np.testing.assert_allclose(expected_length, raster.values, atol=1e-6)

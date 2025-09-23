@@ -103,7 +103,12 @@ def _rasterize_lines_engine(
             seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
             seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
 
-            if seg_xmax < x_grid_min or seg_xmin > x_grid_max or seg_ymax < y_grid_min or seg_ymin > y_grid_max:
+            if (
+                seg_xmax < x_grid_min
+                or seg_xmin > x_grid_max
+                or seg_ymax < y_grid_min
+                or seg_ymin > y_grid_max
+            ):
                 continue
 
             ix_start = np.searchsorted(x, seg_xmin - half_dx, side="right") - 1
@@ -271,7 +276,12 @@ def _rasterize_polygons_engine(
             np.max(exterior_coords[:, 1]),
         )
 
-        if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
+        if (
+            poly_xmax < x_grid_min
+            or poly_xmin > x_grid_max
+            or poly_ymax < y_grid_min
+            or poly_ymin > y_grid_max
+        ):
             continue
 
         ix_start = np.searchsorted(x, poly_xmin - half_dx, side="right") - 1
@@ -306,7 +316,9 @@ def _rasterize_polygons_engine(
                         int_start = interiors_ring_offsets[j]
                         int_end = interiors_ring_offsets[j + 1]
                         interior_coords = interiors_coords[int_start:int_end]
-                        clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
+                        clipped_interior = _clip_polygon_numba(
+                            interior_coords, clip_box
+                        )
                         area -= _polygon_area_numba(clipped_interior)
 
                 if area > 1e-9:
