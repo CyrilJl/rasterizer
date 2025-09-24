@@ -20,7 +20,7 @@ def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     interiors = gdf_poly.geometry.interiors
     ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
     if ret.empty:
-        return np.empty((0, 4), dtype=np.float32)
+        return np.empty((0, 4), dtype=np.float64)
 
     temp_df = ret.reset_index()
     temp_df["sub_index"] = ret.groupby("index").cumcount()
@@ -67,7 +67,7 @@ def rasterize_polygons(
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
@@ -85,7 +85,7 @@ def rasterize_polygons(
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
@@ -96,23 +96,23 @@ def rasterize_polygons(
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
         else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
     exteriors = compute_exterior(polygons_proj)
     interiors = compute_interiors(polygons_proj)
 
-    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3]).astype(np.float32)
+    exteriors_coords = np.ascontiguousarray(exteriors[:, 1:3]).astype(np.float64)
     ext_boundaries = np.where(exteriors[:-1, 0] != exteriors[1:, 0])[0] + 1
     exteriors_offsets = np.concatenate(([0], ext_boundaries, [exteriors.shape[0]]))
 
-    interiors_coords = np.empty((0, 2), dtype=np.float32)
+    interiors_coords = np.empty((0, 2), dtype=np.float64)
     interiors_ring_offsets = np.array([0], dtype=np.intp)
     interiors_poly_offsets = np.full(num_polygons + 1, 0, dtype=np.intp)
 
     if interiors.shape[0] > 0:
-        interiors_coords = np.ascontiguousarray(interiors[:, 2:4]).astype(np.float32)
+        interiors_coords = np.ascontiguousarray(interiors[:, 2:4]).astype(np.float64)
         int_ids = interiors[:, :2]
         int_ring_boundaries = np.where((int_ids[:-1, 0] != int_ids[1:, 0]) | (int_ids[:-1, 1] != int_ids[1:, 1]))[0] + 1
         interiors_ring_offsets = np.concatenate(([0], int_ring_boundaries, [int_ids.shape[0]]))

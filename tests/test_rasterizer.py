@@ -162,7 +162,7 @@ def test_rasterize_polygons(grid, grid_gdf):
 
     # Rasterize with mode='area'
     raster_area = rasterize_polygons(gdf_polygons, **grid, mode="area")
-    np.testing.assert_allclose(raster_area.values, expected_areas, atol=1e-3)
+    np.testing.assert_allclose(raster_area.values, expected_areas)
 
     # Rasterize with mode='binary' and check for consistency
     # raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
