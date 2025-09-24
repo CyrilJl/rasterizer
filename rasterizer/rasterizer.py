@@ -1,5 +1,3 @@
-import rioxarray
-import xarray as xr
 
 
 def geocode(ds, x_name, y_name, crs):
