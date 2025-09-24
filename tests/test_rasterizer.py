@@ -14,6 +14,8 @@ from shapely.geometry import (
 
 from rasterizer import rasterize_lines, rasterize_polygons
 
+np.random.seed(0)
+
 # Common setup for tests
 CRS = "EPSG:32631"  # UTM 31N, metric CRS
 X_RANGE = (0, 100)
