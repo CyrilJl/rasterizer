@@ -16,8 +16,8 @@ For detailed usage and API documentation, please see the [full documentation](ht
 
 ## Installation
 
-You can install the package directly from the source code:
+You can install the package directly from PyPI:
 
 ```bash
-pip install .
+pip install rasterizer
 ```
