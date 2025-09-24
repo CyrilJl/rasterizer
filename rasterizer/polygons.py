@@ -17,7 +17,12 @@ def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     """
     Computes the interior coordinates of a GeoDataFrame of polygons.
     """
-    interiors = gdf_poly.geometry.interiors
+    # this is much faster than naively exploding all interiors
+    gdf_interiors = gdf_poly[gdf_poly.geometry.count_interior_rings() > 0]
+    if gdf_interiors.empty:
+        return np.empty((0, 4), dtype=np.float64)
+
+    interiors = gdf_interiors.geometry.interiors
     ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
     if ret.empty:
         return np.empty((0, 4), dtype=np.float64)
