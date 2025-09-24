@@ -84,7 +84,7 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    polygons_proj = polygons_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
+    polygons_proj = polygons_proj.cx[x_grid_min:x_grid_max, y_grid_min:y_grid_max]
 
     if polygons_proj.empty:
         if mode == "binary":
