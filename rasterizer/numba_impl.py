@@ -4,7 +4,7 @@ import numba
 import numpy as np
 
 
-@numba.jit(nopython=True, fastmath=True)
+@numba.jit(nopython=True)
 def _clip_line_cohen_sutherland_numba(
     xa: float,
     ya: float,
@@ -77,7 +77,7 @@ def _clip_line_cohen_sutherland_numba(
         return 0.0
 
 
-@numba.jit(nopython=True, fastmath=True)
+@numba.jit(nopython=True)
 def _rasterize_lines_engine(
     geoms: np.ndarray,
     x: np.ndarray,
@@ -93,7 +93,7 @@ def _rasterize_lines_engine(
     mode_is_binary: bool,
 ) -> np.ndarray:
     """Rasterizes lines on a grid."""
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
     for i in range(len(geoms) - 1):
         # Check if the current and next points belong to the same line
         if geoms[i, 0] == geoms[i + 1, 0]:
@@ -156,7 +156,7 @@ def _rasterize_lines_engine(
     return raster_data
 
 
-@numba.jit(nopython=True, fastmath=True)
+@numba.jit(nopython=True)
 def _polygon_area_numba(coords: np.ndarray) -> float:
     """Calculates the area of a polygon."""
     if len(coords) < 3:
@@ -169,7 +169,7 @@ def _polygon_area_numba(coords: np.ndarray) -> float:
     return abs(area) / 2.0
 
 
-@numba.jit(nopython=True, fastmath=True)
+@numba.jit(nopython=True)
 def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarray:
     """Clips a polygon to a rectangular box."""
     xmin, ymin, xmax, ymax = clip_box
@@ -179,7 +179,7 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
         # edge: 0 for left, 1 for right, 2 for bottom, 3 for top
         output = []
         if not len(coords):
-            return np.empty((0, 2), dtype=np.float32)
+            return np.empty((0, 2), dtype=np.float64)
 
         p1 = coords[-1]
         for p2_idx in range(len(coords)):
@@ -203,29 +203,29 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
                     if edge < 2:  # vertical edge (left/right)
                         ix = value
                         iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                        output.append(np.array([ix, iy], dtype=np.float32))
+                        output.append(np.array([ix, iy], dtype=np.float64))
                     else:  # horizontal edge (bottom/top)
                         iy = value
                         ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                        output.append(np.array([ix, iy], dtype=np.float32))
+                        output.append(np.array([ix, iy], dtype=np.float64))
                 output.append(p2)
             elif p1_inside:  # p1 inside, p2 outside -> intersection
                 # calculate intersection
                 if edge < 2:  # vertical edge
                     ix = value
                     iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                    output.append(np.array([ix, iy], dtype=np.float32))
+                    output.append(np.array([ix, iy], dtype=np.float64))
                 else:  # horizontal edge
                     iy = value
                     ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                    output.append(np.array([ix, iy], dtype=np.float32))
+                    output.append(np.array([ix, iy], dtype=np.float64))
             p1 = p2
 
         if not output:
-            return np.empty((0, 2), dtype=np.float32)
+            return np.empty((0, 2), dtype=np.float64)
 
         # Manual vstack
-        res = np.empty((len(output), 2), dtype=np.float32)
+        res = np.empty((len(output), 2), dtype=np.float64)
         for i, arr in enumerate(output):
             res[i, 0] = arr[0]
             res[i, 1] = arr[1]
@@ -240,7 +240,7 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
     return clipped_coords
 
 
-@numba.jit(nopython=True, fastmath=True)
+@numba.jit(nopython=True)
 def _rasterize_polygons_engine(
     num_polygons: int,
     exteriors_coords: np.ndarray,
@@ -259,7 +259,7 @@ def _rasterize_polygons_engine(
     mode_is_binary: bool,
 ) -> np.ndarray:
     """Rasterizes polygons on a grid."""
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
     for i in range(num_polygons):
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
         exterior_coords = exteriors_coords[ext_start:ext_end]
