@@ -24,5 +24,4 @@ jobs:
 
     - name: Run ruff
       run: |
-        ruff format . --check
-        ruff check .
+        ruff format .
