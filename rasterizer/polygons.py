@@ -10,7 +10,7 @@ def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     """
     Computes the exterior coordinates of a GeoDataFrame of polygons.
     """
-    return gdf_poly.geometry.exterior.get_coordinates().reset_index().values
+    return gdf_poly.explode().geometry.exterior.get_coordinates().reset_index().values
 
 
 def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
