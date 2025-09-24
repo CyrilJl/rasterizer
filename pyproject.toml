@@ -1,10 +1,10 @@
 [project]
 name = "rasterizer"
-version = "0.1.0"
+version = "0.2"
 description = "A Python package to rasterize GeoDataFrames"
-authors = [{name = "Jules"}]
+authors = [{name = "Cyril Joly"}]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "geopandas",
     "xarray",
@@ -15,18 +15,16 @@ dependencies = [
     "tqdm"
 ]
 
+[project.urls]
+Homepage = "https://github.com/CyrilJl/rasterizer"
+Documentation = "https://rasterizer.readthedocs.io"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
-test = [
-    "pytest",
-    "scipy"
-]
-dev = [
-    "ruff"
-]
+test = ["pytest","scipy"]
 
 [tool.ruff]
 line-length = 120
