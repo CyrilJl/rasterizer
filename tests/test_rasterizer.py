@@ -165,6 +165,6 @@ def test_rasterize_polygons(grid, grid_gdf):
     np.testing.assert_allclose(raster_area.values, expected_areas)
 
     # Rasterize with mode='binary' and check for consistency
-    # raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
-    # expected_bin = expected_areas > 0
-    # np.testing.assert_array_equal(raster_bin.values, expected_bin)
+    raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
+    expected_bin = expected_areas > 0
+    np.testing.assert_array_equal(raster_bin.values, expected_bin)
