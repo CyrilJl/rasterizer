@@ -126,7 +126,7 @@ def test_rasterize_lines(grid, grid_gdf):
     gdf_lines = gpd.GeoDataFrame(geometry=lines, crs=CRS)
 
     # Use geopandas overlay to get the expected lengths
-    overlay = gpd.overlay(grid_gdf, gdf_lines, how="intersection", keep_geom_type=False)
+    overlay = gpd.overlay(grid_gdf, gdf_lines.explode(), how="intersection", keep_geom_type=False)
     overlay["length"] = overlay.geometry.length
     expected_lengths = overlay.groupby(["row", "col"])["length"].sum().reset_index()
     expected_lengths = expected_lengths.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
@@ -151,7 +151,7 @@ def test_rasterize_polygons(grid, grid_gdf):
     gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
 
     # Use geopandas overlay to get the expected areas
-    overlay = gpd.overlay(grid_gdf, gdf_polygons, how="intersection")
+    overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(), how="intersection")
     overlay["area"] = overlay.geometry.area
     expected_areas = overlay.groupby(["row", "col"])["area"].sum().reset_index()
     expected_areas = expected_areas.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
