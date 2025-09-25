@@ -41,6 +41,7 @@ def rasterize_polygons(
     y: np.ndarray,
     crs,
     mode: str = "area",
+    weight: str = None,
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular grid.
@@ -53,12 +54,25 @@ def rasterize_polygons(
         mode (str, optional): 'binary' or 'area'. Defaults to 'area'.
             - 'binary': the cell is True if covered, False otherwise.
             - 'area': the cell contains the area of the polygon that covers it.
+        weight (str, optional): If specified, must be a str designating a
+            numerical column of the processed gdf. The computed values of the
+            raster are the area of the intersected polygon by each mesh
+            multiplied by the value of the specified column. Defaults to None.
+
 
     Returns:
         xr.DataArray: A rasterized DataArray.
     """
     if mode not in ["binary", "area"]:
         raise ValueError("Mode must be 'binary' or 'area'")
+
+    if weight is not None:
+        if mode == "binary":
+            raise ValueError("Weight argument is not supported for binary mode.")
+        if weight not in polygons.columns:
+            raise ValueError(f"Weight column '{weight}' not found in GeoDataFrame.")
+        if not np.issubdtype(polygons[weight].dtype, np.number):
+            raise ValueError(f"Weight column '{weight}' must be numeric.")
 
     polygons = polygons.copy()
     polygons.geometry = polygons.geometry.force_2d()
@@ -96,6 +110,11 @@ def rasterize_polygons(
 
     polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
     num_polygons = len(polygons_proj)
+
+    if weight is not None:
+        weights = polygons_proj[weight].values
+    else:
+        weights = np.ones(num_polygons, dtype=np.float64)
 
     if num_polygons == 0:
         if mode == "binary":
@@ -144,6 +163,7 @@ def rasterize_polygons(
         y_grid_min,
         y_grid_max,
         mode == "binary",
+        weights,
     )
 
     if mode == "binary":
