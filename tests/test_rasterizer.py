@@ -154,7 +154,7 @@ def test_rasterize_polygons(grid, grid_gdf):
     gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
 
     # Use geopandas overlay to get the expected areas
-    overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(), how="intersection")
+    overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(index_parts=True), how="intersection")
     overlay["area"] = overlay.geometry.area
     expected_areas = overlay.groupby(["row", "col"])["area"].sum().reset_index()
     expected_areas = expected_areas.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
@@ -168,3 +168,47 @@ def test_rasterize_polygons(grid, grid_gdf):
     raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
     expected_bin = expected_areas > 0
     np.testing.assert_array_equal(raster_bin.values, expected_bin)
+
+
+def test_rasterize_polygons_with_weight(grid, grid_gdf):
+    """
+    Test polygon rasterization with a weight column.
+    """
+    # Generate random polygons
+    polygons = generate_random_polygons(20, X_RANGE, Y_RANGE)
+    gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
+    gdf_polygons["weight"] = np.random.rand(len(gdf_polygons)) * 10
+
+    # Use geopandas overlay to get the expected weighted areas
+    overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(index_parts=True), how="intersection")
+    overlay["area"] = overlay.geometry.area
+    # The weight is in the right geodataframe, which is the second one
+    overlay["weighted_area"] = overlay.area * overlay.weight
+    expected_weighted_areas = overlay.groupby(["row", "col"])["weighted_area"].sum().reset_index()
+    expected_weighted_areas = expected_weighted_areas.merge(
+        grid_gdf[["row", "col"]], on=["row", "col"], how="right"
+    )
+    expected_weighted_areas = expected_weighted_areas.fillna(0)["weighted_area"].values.reshape((len(Y), len(X)))
+
+    # Rasterize with mode='area' and weight
+    raster_weighted = rasterize_polygons(gdf_polygons, **grid, mode="area", weight="weight")
+    np.testing.assert_allclose(raster_weighted.values, expected_weighted_areas)
+
+
+def test_rasterize_polygons_weight_errors(grid):
+    """
+    Test error handling for the weight argument in polygon rasterization.
+    """
+    polygons = generate_random_polygons(5, X_RANGE, Y_RANGE)
+    gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
+    gdf_polygons["weight"] = np.random.rand(len(gdf_polygons))
+    gdf_polygons["non_numeric_weight"] = ["a", "b", "c", "d", "e"]
+
+    with pytest.raises(ValueError, match="Weight argument is not supported for binary mode."):
+        rasterize_polygons(gdf_polygons, **grid, mode="binary", weight="weight")
+
+    with pytest.raises(ValueError, match="Weight column 'non_existent_column' not found in GeoDataFrame."):
+        rasterize_polygons(gdf_polygons, **grid, mode="area", weight="non_existent_column")
+
+    with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
+        rasterize_polygons(gdf_polygons, **grid, mode="area", weight="non_numeric_weight")

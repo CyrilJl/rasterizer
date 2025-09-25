@@ -257,10 +257,12 @@ def _rasterize_polygons_engine(
     y_grid_min: float,
     y_grid_max: float,
     mode_is_binary: bool,
+    weights: np.ndarray,
 ) -> np.ndarray:
     """Rasterizes polygons on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
     for i in range(num_polygons):
+        weight = weights[i]
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
         exterior_coords = exteriors_coords[ext_start:ext_end]
 
@@ -313,5 +315,5 @@ def _rasterize_polygons_engine(
                     if mode_is_binary:
                         raster_data[iy, ix] = 1
                     else:
-                        raster_data[iy, ix] += area
+                        raster_data[iy, ix] += area * weight
     return raster_data
