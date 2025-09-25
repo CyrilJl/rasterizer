@@ -80,6 +80,7 @@ def _clip_line_cohen_sutherland_numba(
 @numba.jit(nopython=True)
 def _rasterize_lines_engine(
     geoms: np.ndarray,
+    line_weights: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     dx: float,
@@ -97,6 +98,8 @@ def _rasterize_lines_engine(
     for i in range(len(geoms) - 1):
         # Check if the current and next points belong to the same line
         if geoms[i, 0] == geoms[i + 1, 0]:
+            line_idx = int(geoms[i, 0])
+            weight = line_weights[line_idx]
             xa, ya = geoms[i, 1], geoms[i, 2]
             xb, yb = geoms[i + 1, 1], geoms[i + 1, 2]
 
@@ -151,7 +154,7 @@ def _rasterize_lines_engine(
                         if mode_is_binary:
                             raster_data[iy, ix] = 1
                         else:
-                            raster_data[iy, ix] += clipped_length
+                            raster_data[iy, ix] += clipped_length * weight
 
     return raster_data
 

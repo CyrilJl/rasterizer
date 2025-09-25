@@ -210,3 +210,45 @@ def test_rasterize_polygons_weight_errors(grid):
 
     with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
         rasterize_polygons(gdf_polygons, **grid, mode="area", weight="non_numeric_weight")
+
+
+def test_rasterize_lines_with_weight(grid, grid_gdf):
+    """
+    Test line rasterization with a weight column.
+    """
+    # Generate random lines
+    lines = generate_random_lines(50, X_RANGE, Y_RANGE)
+    gdf_lines = gpd.GeoDataFrame(geometry=lines, crs=CRS)
+    gdf_lines["weight"] = np.random.rand(len(gdf_lines)) * 10
+
+    # Use geopandas overlay to get the expected weighted lengths
+    overlay = gpd.overlay(grid_gdf, gdf_lines.explode(index_parts=True), how="intersection", keep_geom_type=False)
+    overlay["length"] = overlay.geometry.length
+    # The weight is in the right geodataframe, which is the second one
+    overlay["weighted_length"] = overlay.length * overlay.weight
+    expected_weighted_lengths = overlay.groupby(["row", "col"])["weighted_length"].sum().reset_index()
+    expected_weighted_lengths = expected_weighted_lengths.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
+    expected_weighted_lengths = expected_weighted_lengths.fillna(0)["weighted_length"].values.reshape((len(Y), len(X)))
+
+    # Rasterize with mode='length' and weight
+    raster_weighted = rasterize_lines(gdf_lines, **grid, mode="length", weight="weight")
+    np.testing.assert_allclose(raster_weighted.values, expected_weighted_lengths, atol=1e-3)
+
+
+def test_rasterize_lines_weight_errors(grid):
+    """
+    Test error handling for the weight argument in line rasterization.
+    """
+    lines = generate_random_lines(5, X_RANGE, Y_RANGE)
+    gdf_lines = gpd.GeoDataFrame(geometry=lines, crs=CRS)
+    gdf_lines["weight"] = np.random.rand(len(gdf_lines))
+    gdf_lines["non_numeric_weight"] = ["a", "b", "c", "d", "e"][:len(gdf_lines)]
+
+    with pytest.raises(ValueError, match="Weight argument is not supported for binary mode."):
+        rasterize_lines(gdf_lines, **grid, mode="binary", weight="weight")
+
+    with pytest.raises(ValueError, match="Weight column 'non_existent_column' not found in GeoDataFrame."):
+        rasterize_lines(gdf_lines, **grid, mode="length", weight="non_existent_column")
+
+    with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
+        rasterize_lines(gdf_lines, **grid, mode="length", weight="non_numeric_weight")
