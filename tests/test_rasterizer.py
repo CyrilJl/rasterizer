@@ -185,9 +185,7 @@ def test_rasterize_polygons_with_weight(grid, grid_gdf):
     # The weight is in the right geodataframe, which is the second one
     overlay["weighted_area"] = overlay.area * overlay.weight
     expected_weighted_areas = overlay.groupby(["row", "col"])["weighted_area"].sum().reset_index()
-    expected_weighted_areas = expected_weighted_areas.merge(
-        grid_gdf[["row", "col"]], on=["row", "col"], how="right"
-    )
+    expected_weighted_areas = expected_weighted_areas.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
     expected_weighted_areas = expected_weighted_areas.fillna(0)["weighted_area"].values.reshape((len(Y), len(X)))
 
     # Rasterize with mode='area' and weight
