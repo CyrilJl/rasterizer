@@ -227,7 +227,9 @@ def test_rasterize_lines_with_weight(grid, grid_gdf):
     # The weight is in the right geodataframe, which is the second one
     overlay["weighted_length"] = overlay.length * overlay.weight
     expected_weighted_lengths = overlay.groupby(["row", "col"])["weighted_length"].sum().reset_index()
-    expected_weighted_lengths = expected_weighted_lengths.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
+    expected_weighted_lengths = expected_weighted_lengths.merge(
+        grid_gdf[["row", "col"]], on=["row", "col"], how="right"
+    )
     expected_weighted_lengths = expected_weighted_lengths.fillna(0)["weighted_length"].values.reshape((len(Y), len(X)))
 
     # Rasterize with mode='length' and weight
@@ -242,7 +244,7 @@ def test_rasterize_lines_weight_errors(grid):
     lines = generate_random_lines(5, X_RANGE, Y_RANGE)
     gdf_lines = gpd.GeoDataFrame(geometry=lines, crs=CRS)
     gdf_lines["weight"] = np.random.rand(len(gdf_lines))
-    gdf_lines["non_numeric_weight"] = ["a", "b", "c", "d", "e"][:len(gdf_lines)]
+    gdf_lines["non_numeric_weight"] = ["a", "b", "c", "d", "e"][: len(gdf_lines)]
 
     with pytest.raises(ValueError, match="Weight argument is not supported for binary mode."):
         rasterize_lines(gdf_lines, **grid, mode="binary", weight="weight")

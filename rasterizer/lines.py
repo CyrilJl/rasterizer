@@ -87,9 +87,7 @@ def rasterize_lines(
     else:
         weights = np.ones(num_lines, dtype=np.float64)
 
-    geoms_to_process = (
-        lines_proj.get_coordinates().reset_index().values.astype(np.float64)
-    )
+    geoms_to_process = lines_proj.get_coordinates().reset_index().values.astype(np.float64)
 
     raster_data_float = _rasterize_lines_engine(
         geoms_to_process,
