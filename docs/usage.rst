@@ -28,7 +28,11 @@ You can rasterize polygons in either binary or area mode.
      - **Area Mode**
    * - .. image:: polygons_binary.png
      - .. image:: polygons_area.png
+   * - .. image:: _static/lines_binary.png
+     - .. image:: _static/lines_length.png
 
+   * - .. image:: _static/polygons_binary.png
+     - .. image:: _static/polygons_area.png
 Usage
 =====
 
