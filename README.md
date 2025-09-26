@@ -33,7 +33,7 @@ You can rasterize lines in either binary or length mode.
 
 | Binary Mode | Length Mode |
 |---|---|
-| ![Lines - Binary](docs/lines_binary.png) | ![Lines - Length](docs/lines_length.png) |
+| ![Lines - Binary](docs/_static/lines_binary.png) | ![Lines - Length](docs/_static/lines_length.png) |
 
 ### Rasterizing Polygons
 
@@ -41,4 +41,4 @@ You can rasterize polygons in either binary or area mode.
 
 | Binary Mode | Area Mode |
 |---|---|
-| ![Polygons - Binary](docs/polygons_binary.png) | ![Polygons - Area](docs/polygons_area.png) |
+| ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
