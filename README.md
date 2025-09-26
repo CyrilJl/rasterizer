@@ -10,6 +10,7 @@ For detailed usage and API documentation, please see the [full documentation](ht
 
 - Rasterize lines into a binary (presence/absence) or length-based grid.
 - Rasterize polygons into a binary (presence/absence) or area-based grid.
+- Weighted rasterization: Rasterize geometries while weighting the output by a numerical column in the GeoDataFrame.
 - Works with `geopandas` GeoDataFrames.
 - Outputs an `xarray.DataArray` for easy integration with other scientific Python libraries.
 - No GDAL dependency for the rasterization algorithm itself.
