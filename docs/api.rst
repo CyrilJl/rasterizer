@@ -1,5 +1,5 @@
 API
 ===
 
-.. automodule:: rasterizer.rasterizer
+.. automodule:: rasterizer
    :members:
