@@ -1,3 +1,34 @@
+Visual Examples
+===============
+
+Here are some examples of what you can do with `rasterizer`.
+
+Rasterizing Lines
+-----------------
+
+You can rasterize lines in either binary or length mode.
+
+.. list-table::
+   :widths: 50 50
+
+   * - **Binary Mode**
+     - **Length Mode**
+   * - .. image:: lines_binary.png
+     - .. image:: lines_length.png
+
+Rasterizing Polygons
+--------------------
+
+You can rasterize polygons in either binary or area mode.
+
+.. list-table::
+   :widths: 50 50
+
+   * - **Binary Mode**
+     - **Area Mode**
+   * - .. image:: polygons_binary.png
+     - .. image:: polygons_area.png
+
 Usage
 =====
 
