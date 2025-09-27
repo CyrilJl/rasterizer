@@ -108,11 +108,14 @@ def rasterize_polygons(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
+    if weight is not None:
+        polygons_proj = polygons_proj.assign(__polygon_area=polygons_proj.area)
+
     polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
     num_polygons = len(polygons_proj)
 
     if weight is not None:
-        weights = polygons_proj[weight].values
+        weights = polygons_proj[weight].values * polygons_proj["__polygon_area"].values
     else:
         weights = np.ones(num_polygons, dtype=np.float64)
 
