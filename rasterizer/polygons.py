@@ -100,6 +100,9 @@ def rasterize_polygons(
 
     polygons_proj = polygons_proj.cx[x_grid_min:x_grid_max, y_grid_min:y_grid_max]
 
+    if mode != "binary":
+        polygons_proj = polygons_proj[polygons_proj.area > 0]
+
     if polygons_proj.empty:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)

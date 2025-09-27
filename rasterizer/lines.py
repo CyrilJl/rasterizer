@@ -71,6 +71,9 @@ def rasterize_lines(
 
     lines_proj = lines_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
 
+    if mode != "binary":
+        lines_proj = lines_proj[lines_proj.length > 0]
+
     if lines_proj.empty:
         if mode == "binary":
             raster_data = np.full((len(y), len(x)), False, dtype=bool)
@@ -79,11 +82,17 @@ def rasterize_lines(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
+    if weight is not None:
+        # This normalization is analogous to how rasterize_polygons handles
+        # area normalization. The weight is normalized by the total length of
+        # the original feature (LineString or MultiLineString).
+        lines_proj = lines_proj.assign(__line_length=lines_proj.length)
+
     lines_proj = lines_proj.explode(index_parts=False, ignore_index=True)
     num_lines = len(lines_proj)
 
     if weight is not None:
-        weights = lines_proj[weight].values.astype(np.float64)
+        weights = lines_proj[weight].values / lines_proj["__line_length"].values
     else:
         weights = np.ones(num_lines, dtype=np.float64)
 
