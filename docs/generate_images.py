@@ -6,9 +6,29 @@ from shapely.geometry import LineString, Point
 from rasterizer.lines import rasterize_lines
 from rasterizer.polygons import rasterize_polygons
 
+# --- Parameters ---
+GRID_SIZE_X = 50  # Number of grid cells in X
+GRID_SIZE_Y = 50  # Number of grid cells in Y
+GRID_X_MIN = 0  # Minimum X bound
+GRID_X_MAX = 5  # Maximum X bound
+GRID_Y_MIN = 0  # Minimum Y bound
+GRID_Y_MAX = 5  # Maximum Y bound
+NUM_LINES = 13  # Number of lines to generate
+NUM_POLYGONS = 15  # Number of polygons to generate
+SAVE_PATH = "docs/_static"  # Path to save images
+
+
 # Grid setup
-x_centers = np.arange(0.5, 5.5, 1.0)
-y_centers = np.arange(0.5, 5.5, 1.0)
+x_centers = np.linspace(
+    GRID_X_MIN + 0.5 * (GRID_X_MAX - GRID_X_MIN) / GRID_SIZE_X,
+    GRID_X_MAX - 0.5 * (GRID_X_MAX - GRID_X_MIN) / GRID_SIZE_X,
+    GRID_SIZE_X,
+)
+y_centers = np.linspace(
+    GRID_Y_MIN + 0.5 * (GRID_Y_MAX - GRID_Y_MIN) / GRID_SIZE_Y,
+    GRID_Y_MAX - 0.5 * (GRID_Y_MAX - GRID_Y_MIN) / GRID_SIZE_Y,
+    GRID_SIZE_Y,
+)
 dx = x_centers[1] - x_centers[0] if len(x_centers) > 1 else 1.0
 dy = y_centers[1] - y_centers[0] if len(y_centers) > 1 else 1.0
 x_edges = np.arange(x_centers[0] - dx / 2, x_centers[-1] + dx, dx)
@@ -18,9 +38,15 @@ crs = "EPSG:3857"
 # --- Generate Lines ---
 np.random.seed(0)
 lines = []
-for _ in range(8):
-    start = (np.random.rand() * 5, np.random.rand() * 5)
-    end = (np.random.rand() * 5, np.random.rand() * 5)
+for _ in range(NUM_LINES):
+    start = (
+        np.random.rand() * (GRID_X_MAX - GRID_X_MIN) + GRID_X_MIN,
+        np.random.rand() * (GRID_Y_MAX - GRID_Y_MIN) + GRID_Y_MIN,
+    )
+    end = (
+        np.random.rand() * (GRID_X_MAX - GRID_X_MIN) + GRID_X_MIN,
+        np.random.rand() * (GRID_Y_MAX - GRID_Y_MIN) + GRID_Y_MIN,
+    )
     lines.append(LineString([start, end]))
 
 lines_gdf = gpd.GeoDataFrame(geometry=lines, crs=crs)
@@ -34,7 +60,7 @@ plt.gca().set_aspect("equal", adjustable="box")
 plt.gca().axis("off")
 plt.title("Lines - Binary")
 plt.tight_layout()
-plt.savefig("docs/_static/lines_binary.png", bbox_inches="tight")
+plt.savefig(f"{SAVE_PATH}/lines_binary.png", bbox_inches="tight")
 
 # Rasterize lines (length)
 lines_length = rasterize_lines(lines_gdf, x_centers, y_centers, crs, mode="length")
@@ -46,25 +72,23 @@ plt.gca().set_aspect("equal", adjustable="box")
 plt.gca().axis("off")
 plt.title("Lines - Length")
 plt.tight_layout()
-plt.savefig("docs/_static/lines_length.png", bbox_inches="tight")
+plt.savefig(f"{SAVE_PATH}/lines_length.png", bbox_inches="tight")
 
 
 # --- Generate Polygons ---
-np.random.seed(1)
+np.random.seed(8)
 polygons = []
-for _ in range(5):
-    point = Point(np.random.rand() * 5, np.random.rand() * 5)
+for _ in range(NUM_POLYGONS):
+    point = Point(
+        np.random.rand() * (GRID_X_MAX - GRID_X_MIN) + GRID_X_MIN,
+        np.random.rand() * (GRID_Y_MAX - GRID_Y_MIN) + GRID_Y_MIN,
+    )
     polygons.append(point.buffer(0.5))
 
 polygons_gdf = gpd.GeoDataFrame(geometry=polygons, crs=crs)
 polygons_gdf = gpd.clip(
     polygons_gdf,
-    mask=(
-        0,
-        0,
-        6,
-        6,
-    ),
+    mask=(GRID_X_MIN, GRID_Y_MIN, GRID_X_MAX, GRID_Y_MAX),
 )
 
 # Rasterize polygons (binary)
@@ -76,7 +100,7 @@ plt.gca().set_aspect("equal", adjustable="box")
 plt.gca().axis("off")
 plt.title("Polygons - Binary")
 plt.tight_layout()
-plt.savefig("docs/_static/polygons_binary.png", bbox_inches="tight")
+plt.savefig(f"{SAVE_PATH}/polygons_binary.png", bbox_inches="tight")
 
 # Rasterize polygons (area)
 polygons_area = rasterize_polygons(polygons_gdf, x_centers, y_centers, crs, mode="area")
@@ -88,4 +112,4 @@ plt.gca().set_aspect("equal", adjustable="box")
 plt.gca().axis("off")
 plt.title("Polygons - Area")
 plt.tight_layout()
-plt.savefig("docs/_static/polygons_area.png", bbox_inches="tight")
+plt.savefig(f"{SAVE_PATH}/polygons_area.png", bbox_inches="tight")
