@@ -115,7 +115,7 @@ def rasterize_polygons(
     num_polygons = len(polygons_proj)
 
     if weight is not None:
-        weights = polygons_proj[weight].values * polygons_proj["__polygon_area"].values
+        weights = polygons_proj[weight].values / polygons_proj["__polygon_area"].values
     else:
         weights = np.ones(num_polygons, dtype=np.float64)
 
