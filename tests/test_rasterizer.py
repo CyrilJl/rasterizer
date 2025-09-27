@@ -184,7 +184,7 @@ def test_rasterize_polygons_with_weight(grid, grid_gdf):
     overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(index_parts=True), how="intersection")
     overlay["area"] = overlay.geometry.area
     # The weight is in the right geodataframe, which is the second one
-    overlay["weighted_area"] = overlay.area * overlay.weight * overlay["__polygon_area"]
+    overlay["weighted_area"] = overlay.area * overlay.weight / overlay["__polygon_area"]
     expected_weighted_areas = overlay.groupby(["row", "col"])["weighted_area"].sum().reset_index()
     expected_weighted_areas = expected_weighted_areas.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
     expected_weighted_areas = expected_weighted_areas.fillna(0)["weighted_area"].values.reshape((len(Y), len(X)))
@@ -222,11 +222,13 @@ def test_rasterize_lines_with_weight(grid, grid_gdf):
     gdf_lines = gpd.GeoDataFrame(geometry=lines, crs=CRS)
     gdf_lines["weight"] = np.random.rand(len(gdf_lines)) * 10
 
+    gdf_lines["__line_length"] = gdf_lines.length
+
     # Use geopandas overlay to get the expected weighted lengths
     overlay = gpd.overlay(grid_gdf, gdf_lines.explode(index_parts=True), how="intersection", keep_geom_type=False)
     overlay["length"] = overlay.geometry.length
     # The weight is in the right geodataframe, which is the second one
-    overlay["weighted_length"] = overlay.length * overlay.weight
+    overlay["weighted_length"] = overlay.length * overlay.weight / overlay["__line_length"]
     expected_weighted_lengths = overlay.groupby(["row", "col"])["weighted_length"].sum().reset_index()
     expected_weighted_lengths = expected_weighted_lengths.merge(
         grid_gdf[["row", "col"]], on=["row", "col"], how="right"
