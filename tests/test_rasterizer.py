@@ -178,12 +178,13 @@ def test_rasterize_polygons_with_weight(grid, grid_gdf):
     polygons = generate_random_polygons(20, X_RANGE, Y_RANGE)
     gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
     gdf_polygons["weight"] = np.random.rand(len(gdf_polygons)) * 10
+    gdf_polygons["__polygon_area"] = gdf_polygons.area
 
     # Use geopandas overlay to get the expected weighted areas
     overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(index_parts=True), how="intersection")
     overlay["area"] = overlay.geometry.area
     # The weight is in the right geodataframe, which is the second one
-    overlay["weighted_area"] = overlay.area * overlay.weight
+    overlay["weighted_area"] = overlay.area * overlay.weight * overlay["__polygon_area"]
     expected_weighted_areas = overlay.groupby(["row", "col"])["weighted_area"].sum().reset_index()
     expected_weighted_areas = expected_weighted_areas.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
     expected_weighted_areas = expected_weighted_areas.fillna(0)["weighted_area"].values.reshape((len(Y), len(X)))
