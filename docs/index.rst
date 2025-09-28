@@ -3,10 +3,13 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to rasterizer's documentation!
-======================================
+rasterizer
+==========
 
-`rasterizer` is a Python library for rasterizing vector data (lines and polygons) onto a regular grid. It was developed to handle rasterization based on the length or area of intersection with each grid cell, which is a feature not readily available in other libraries like Rasterio or GDAL. It is designed to be fast and memory-efficient, especially for large grids and large GeoDataFrames, using a Numba-accelerated implementation.
+``rasterizer`` is a Python library for rasterizing vector data (lines and polygons) onto a regular grid. It
+was developed to handle rasterization based on the length or area of intersection with each grid cell, which
+is a feature not readily available in other libraries like Rasterio or GDAL. It is designed to be fast and
+memory-efficient, especially for large grids and large GeoDataFrames, using a Numba-accelerated implementation.
 
 For example, you can rasterize polygons like this:
 
@@ -24,11 +27,11 @@ For example, you can rasterize polygons like this:
         y=y,
         crs=crs,
         mode='area',
-        weight='your_weight_column'
+        weight='your_weight_column' # or None
     )
     # `raster` is a properly georeferenced xarray.DataArray
 
-You can install `rasterizer` using PyPI:
+You can install ``rasterizer`` using PyPI:
 
 .. code-block:: bash
 
