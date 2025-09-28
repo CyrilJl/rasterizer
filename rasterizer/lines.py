@@ -2,8 +2,8 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from .numba_impl import _rasterize_lines_engine
-from .rasterizer import geocode
+from ._numba_engines import _rasterize_lines_engine
+from ._misc import geocode
 
 
 def rasterize_lines(
