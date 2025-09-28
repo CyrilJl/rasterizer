@@ -6,9 +6,16 @@
 Welcome to rasterizer's documentation!
 ======================================
 
+You can install `rasterizer` using PyPI:
+
+.. code-block:: bash
+
+   pip install rasterizer
+
 .. toctree::
    :maxdepth: 1
    :caption: Contents:
+   :hidden:
 
    usage
    api
