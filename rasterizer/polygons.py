@@ -2,8 +2,8 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from .numba_impl import _rasterize_polygons_engine
-from .rasterizer import geocode
+from ._numba_engines import _rasterize_polygons_engine
+from ._misc import geocode
 
 
 def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
@@ -56,8 +56,9 @@ def rasterize_polygons(
             - 'area': the cell contains the area of the polygon that covers it.
         weight (str, optional): If specified, must be a str designating a
             numerical column of the processed gdf. The computed values of the
-            raster are the area of the intersected polygon by each mesh
-            multiplied by the value of the specified column. Defaults to None.
+            raster are the fraction of the area of the intersected polygon by
+            each mesh multiplied by the value of the specified column.
+            Defaults to None.
 
 
     Returns:

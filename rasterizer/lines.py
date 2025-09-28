@@ -27,8 +27,9 @@ def rasterize_lines(
             - 'length': the cell contains the total length of the line segments.
         weight (str, optional): If specified, must be a str designating a
             numerical column of the processed gdf. The computed values of the
-            raster are the length of the intersected line by each mesh
-            multiplied by the value of the specified column. Defaults to None.
+            raster are the fraction of the length of the intersected line by
+            each mesh multiplied by the value of the specified column.
+            Defaults to None.
 
 
     Returns:
