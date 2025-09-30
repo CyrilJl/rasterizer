@@ -152,6 +152,7 @@ def test_rasterize_polygons(grid, grid_gdf):
     # Generate random polygons
     polygons = generate_random_polygons(20, X_RANGE, Y_RANGE)
     gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
+    gdf_polygons.geometry = gdf_polygons.geometry.buffer(0)
 
     # Use geopandas overlay to get the expected areas
     overlay = gpd.overlay(grid_gdf, gdf_polygons.explode(index_parts=True), how="intersection")
@@ -177,6 +178,7 @@ def test_rasterize_polygons_with_weight(grid, grid_gdf):
     # Generate random polygons
     polygons = generate_random_polygons(20, X_RANGE, Y_RANGE)
     gdf_polygons = gpd.GeoDataFrame(geometry=polygons, crs=CRS)
+    gdf_polygons.geometry = gdf_polygons.geometry.buffer(0)
     gdf_polygons["weight"] = np.random.rand(len(gdf_polygons)) * 10
     gdf_polygons["__polygon_area"] = gdf_polygons.area
 
