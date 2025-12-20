@@ -1,7 +1,6 @@
 import random
 
 import geopandas as gpd
-import rioxarray
 import numpy as np
 import pytest
 from scipy.spatial import ConvexHull
