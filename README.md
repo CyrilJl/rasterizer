@@ -2,10 +2,6 @@
 
 `rasterizer` is a lightweight Python package for rasterizing `geopandas` GeoDataFrames.
 
-This package provides functionalities that are not present in `rasterio.features`, such as area and length-based rasterization. It is also lighter and faster than using GDAL-based solutions.
-
-For detailed usage and API documentation, please see the [full documentation](https://rasterizer.readthedocs.io).
-
 ## Features
 
 - Rasterize lines into a binary (presence/absence) or length-based grid.
@@ -15,17 +11,19 @@ For detailed usage and API documentation, please see the [full documentation](ht
 - Outputs an `xarray.DataArray` for easy integration with other scientific Python libraries.
 - No GDAL dependency for the rasterization algorithm itself.
 
-## Installation
-
-You can install the package directly from PyPI:
-
-```bash
-pip install rasterizer
-```
+For detailed usage and API documentation, please see the [full documentation](https://rasterizer.readthedocs.io).
 
 ## Usage
 
 Here are some examples of what you can do with `rasterizer`.
+
+```python
+import geopandas as gpd
+from rasterizer import rasterize_polygons
+
+polys = gpd.read_file("polygons.gpkg")
+area_raster = rasterize_polygons(polys, your_x_grid, your_y_grid, polys.crs, mode="area")
+```
 
 ### Rasterizing Lines
 
@@ -42,3 +40,25 @@ You can rasterize polygons in either binary or area mode.
 | Binary Mode | Area Mode |
 |---|---|
 | ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
+
+## Installation
+
+You can install the package directly from PyPI:
+
+```bash
+pip install rasterizer
+```
+
+## Why rasterizer
+
+This package provides functionalities that are not present in `rasterio.features`, such as area and length-based rasterization. It is also lighter and faster than using GDAL-based solutions. GDAL's rasterization only burns values per pixel; it cannot return exact fractional area or length contributions without an expensive workaround. The common workaround is to rasterize at a much finer resolution and then downsample with averaging, which approximates the true area/length but is not exact and can be slow, e.g.:
+
+```bash
+gdal_rasterize -burn 1 -tr 1 1 -ot Float32 -of GTiff input.gpkg tmp_fine.tif
+gdalwarp -tr 10 10 -r average tmp_fine.tif out_area_approx.tif
+```
+
+Doing this purely in `geopandas` by generating one polygon per grid cell and overlaying it with the input geometry is also slow because it creates a huge number of tiny geometries, triggers expensive overlay operations, and scales poorly with grid size.
+
+
+
