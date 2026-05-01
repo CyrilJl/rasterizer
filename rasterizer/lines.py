@@ -43,7 +43,7 @@ def rasterize_lines(
             raise ValueError("Weight argument is not supported for binary mode.")
         if weight not in lines.columns:
             raise ValueError(f"Weight column '{weight}' not found in GeoDataFrame.")
-        if not np.issubdtype(lines[weight].dtype, np.number):
+        if not np.issubdtype(np.asarray(lines[weight]).dtype, np.number):
             raise ValueError(f"Weight column '{weight}' must be numeric.")
 
     lines = lines.copy()

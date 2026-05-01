@@ -5,6 +5,10 @@ import xarray as xr
 from ._numba_engines import _rasterize_polygons_engine
 from ._misc import geocode
 
+# Above this bbox size, it is cheaper to fill interior spans and clip only
+# boundary cells than to clip every cell in the polygon bbox.
+_HYBRID_POLYGON_THRESHOLD_CELLS = 1024
+
 
 def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
     """
@@ -33,6 +37,15 @@ def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
 
     ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
     return ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
+
+
+def _empty_polygon_raster(x: np.ndarray, y: np.ndarray, crs, mode: str) -> xr.DataArray:
+    if mode == "binary":
+        raster_data = np.full((len(y), len(x)), False, dtype=bool)
+    else:
+        raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
+    return geocode(raster, "x", "y", crs)
 
 
 def rasterize_polygons(
@@ -72,7 +85,7 @@ def rasterize_polygons(
             raise ValueError("Weight argument is not supported for binary mode.")
         if weight not in polygons.columns:
             raise ValueError(f"Weight column '{weight}' not found in GeoDataFrame.")
-        if not np.issubdtype(polygons[weight].dtype, np.number):
+        if not np.issubdtype(np.asarray(polygons[weight]).dtype, np.number):
             raise ValueError(f"Weight column '{weight}' must be numeric.")
 
     polygons = polygons.copy()
@@ -84,12 +97,7 @@ def rasterize_polygons(
     polygons_proj = polygons.to_crs(crs)
 
     if len(x) < 2 or len(y) < 2:
-        if mode == "binary":
-            raster_data = np.full((len(y), len(x)), False, dtype=bool)
-        else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-        return geocode(raster, "x", "y", crs)
+        return _empty_polygon_raster(x, y, crs, mode)
 
     dx = x[1] - x[0]
     dy = y[1] - y[0]
@@ -105,12 +113,7 @@ def rasterize_polygons(
         polygons_proj = polygons_proj[polygons_proj.area > 0]
 
     if polygons_proj.empty:
-        if mode == "binary":
-            raster_data = np.full((len(y), len(x)), False, dtype=bool)
-        else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-        return geocode(raster, "x", "y", crs)
+        return _empty_polygon_raster(x, y, crs, mode)
 
     if weight is not None:
         polygons_proj = polygons_proj.assign(__polygon_area=polygons_proj.area)
@@ -124,12 +127,7 @@ def rasterize_polygons(
         weights = np.ones(num_polygons, dtype=np.float64)
 
     if num_polygons == 0:
-        if mode == "binary":
-            raster_data = np.full((len(y), len(x)), False, dtype=bool)
-        else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-        return geocode(raster, "x", "y", crs)
+        return _empty_polygon_raster(x, y, crs, mode)
 
     exteriors = compute_exterior(polygons_proj)
     interiors = compute_interiors(polygons_proj)
@@ -171,6 +169,7 @@ def rasterize_polygons(
         y_grid_max,
         mode == "binary",
         weights,
+        _HYBRID_POLYGON_THRESHOLD_CELLS,
     )
 
     if mode == "binary":

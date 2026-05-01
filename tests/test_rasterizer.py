@@ -1,4 +1,5 @@
 import random
+import importlib
 
 import geopandas as gpd
 import numpy as np
@@ -8,6 +9,7 @@ from shapely.geometry import (
     LineString,
     MultiLineString,
     MultiPolygon,
+    Point,
     Polygon,
     box,
 )
@@ -210,6 +212,48 @@ def test_rasterize_polygons_weight_errors(grid):
 
     with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
         rasterize_polygons(gdf_polygons, **grid, mode="area", weight="non_numeric_weight")
+
+
+def test_rasterize_large_polygon_hybrid_matches_exact(grid, monkeypatch):
+    """
+    Force both polygon engines and check they produce identical values.
+    """
+    polygon_module = importlib.import_module("rasterizer.polygons")
+    shell = Point(50.0, 50.0).buffer(30.0, quad_segs=32)
+    hole = Point(50.0, 50.0).buffer(10.0, quad_segs=32)
+    polygon = Polygon(shell.exterior.coords, [hole.exterior.coords])
+    gdf_polygons = gpd.GeoDataFrame(geometry=[polygon], crs=CRS)
+
+    monkeypatch.setattr(polygon_module, "_HYBRID_POLYGON_THRESHOLD_CELLS", 10**9)
+    raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
+
+    monkeypatch.setattr(polygon_module, "_HYBRID_POLYGON_THRESHOLD_CELLS", 0)
+    raster_hybrid = rasterize_polygons(gdf_polygons, **grid, mode="area")
+
+    np.testing.assert_allclose(raster_hybrid.values, raster_exact.values)
+
+
+def test_rasterize_large_polygon_with_hole_and_weight(grid, grid_gdf, monkeypatch):
+    """
+    Check the hybrid polygon path against GeoPandas for a large donut polygon.
+    """
+    polygon_module = importlib.import_module("rasterizer.polygons")
+    shell = Point(50.0, 50.0).buffer(30.0, quad_segs=32)
+    hole = Point(50.0, 50.0).buffer(10.0, quad_segs=32)
+    polygon = Polygon(shell.exterior.coords, [hole.exterior.coords])
+    gdf_polygons = gpd.GeoDataFrame({"weight": [7.5]}, geometry=[polygon], crs=CRS)
+    gdf_polygons["__polygon_area"] = gdf_polygons.area
+
+    overlay = gpd.overlay(grid_gdf, gdf_polygons, how="intersection", keep_geom_type=False)
+    overlay["area"] = overlay.geometry.area
+    overlay["weighted_area"] = overlay["area"] * overlay["weight"] / overlay["__polygon_area"]
+    expected = overlay.groupby(["row", "col"])["weighted_area"].sum().reset_index()
+    expected = expected.merge(grid_gdf[["row", "col"]], on=["row", "col"], how="right")
+    expected = expected.fillna(0)["weighted_area"].values.reshape((len(Y), len(X)))
+
+    monkeypatch.setattr(polygon_module, "_HYBRID_POLYGON_THRESHOLD_CELLS", 0)
+    raster_weighted = rasterize_polygons(gdf_polygons, **grid, mode="area", weight="weight")
+    np.testing.assert_allclose(raster_weighted.values, expected)
 
 
 def test_rasterize_lines_with_weight(grid, grid_gdf):
