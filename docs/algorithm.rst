@@ -16,7 +16,13 @@ Polygon rasterization has two competing costs:
 - small polygon bounding boxes use an exact engine that clips the polygon against every candidate cell
 - larger polygon bounding boxes use a hybrid engine that clips only boundary cells exactly and fills the interior with scanline spans
 
-The switch happens from an internal bbox-size threshold measured in grid cells.
+The switch happens from an internal bbox-size threshold measured in grid cells. In the current implementation, that threshold is ``1024`` cells.
+
+.. figure:: _static/algorithm_flow.svg
+   :alt: Flow chart showing the switch between the exact and hybrid polygon rasterization paths.
+   :align: center
+
+   The engine chooses between simple exact clipping and a faster hybrid path based on the polygon bounding-box size on the target grid.
 
 Exact Path
 ----------
@@ -32,7 +38,13 @@ This path minimizes algorithmic complexity and is a good fit when the number of 
 Hybrid Path For Large Polygons
 ------------------------------
 
-For larger polygon bounding boxes, the engine separates the work into two parts.
+For larger polygon bounding boxes, the engine separates the work into three stages.
+
+.. figure:: _static/algorithm_hybrid_steps.svg
+   :alt: Three-panel schematic showing boundary marking, scanline span filling, and exact clipping of boundary cells.
+   :align: center
+
+   Large polygons avoid repeated clipping on fully interior cells. This illustration is generated from a Python plotting script that applies the same boundary-marking and scanline rules as the hybrid path.
 
 1. Boundary detection
 
