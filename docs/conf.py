@@ -38,6 +38,7 @@ html_title = project
 html_theme_options = {
     "main_nav_links": {
         "Usage": "usage",
+        "Algorithms": "algorithm",
         "API Reference": "api",
     },
     "extra_header_link_icons": {
