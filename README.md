@@ -29,16 +29,16 @@ area_raster = rasterize_polygons(polys, your_x_grid, your_y_grid, polys.crs, mod
 
 You can rasterize lines in either binary or length mode.
 
-| Binary Mode | Length Mode |
-|---|---|
+| Binary Mode                                      | Length Mode                                      |
+| ------------------------------------------------ | ------------------------------------------------ |
 | ![Lines - Binary](docs/_static/lines_binary.png) | ![Lines - Length](docs/_static/lines_length.png) |
 
 ### Rasterizing Polygons
 
 You can rasterize polygons in either binary or area mode.
 
-| Binary Mode | Area Mode |
-|---|---|
+| Binary Mode                                            | Area Mode                                          |
+| ------------------------------------------------------ | -------------------------------------------------- |
 | ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
 
 ## Installation
@@ -59,6 +59,3 @@ gdalwarp -tr 10 10 -r average tmp_fine.tif out_area_approx.tif
 ```
 
 Doing this purely in `geopandas` by generating one polygon per grid cell and overlaying it with the input geometry is also slow because it creates a huge number of tiny geometries, triggers expensive overlay operations, and scales poorly with grid size.
-
-
-
