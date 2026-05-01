@@ -337,7 +337,9 @@ def _mark_boundary_cells_for_ring(
 
 
 @numba.jit(nopython=True)
-def _append_scanline_intersections(ring_coords: np.ndarray, scan_y: float, intersections: np.ndarray, count: int) -> int:
+def _append_scanline_intersections(
+    ring_coords: np.ndarray, scan_y: float, intersections: np.ndarray, count: int
+) -> int:
     num_coords = len(ring_coords)
     if num_coords == 0:
         return count
