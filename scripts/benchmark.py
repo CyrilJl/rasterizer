@@ -3,8 +3,8 @@ import random
 import time
 
 import geopandas as gpd
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from shapely.geometry import LineString, Point
 
 from rasterizer import rasterize_lines, rasterize_polygons
