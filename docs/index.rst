@@ -43,4 +43,5 @@ You can install ``rasterizer`` using PyPI:
    :hidden:
 
    usage
+   algorithm
    api

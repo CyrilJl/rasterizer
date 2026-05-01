@@ -6,6 +6,7 @@
 
 - Rasterize lines into a binary (presence/absence) or length-based grid.
 - Rasterize polygons into a binary (presence/absence) or area-based grid.
+- Hybrid polygon rasterization for large polygon bounding boxes: exact clipping on boundary cells, faster scanline filling for interior cells.
 - Weighted rasterization: Rasterize geometries while weighting the output by a numerical column in the GeoDataFrame.
 - Works with `geopandas` GeoDataFrames.
 - Outputs an `xarray.DataArray` for easy integration with other scientific Python libraries.
@@ -36,6 +37,8 @@ You can rasterize lines in either binary or length mode.
 ### Rasterizing Polygons
 
 You can rasterize polygons in either binary or area mode.
+
+For polygon workloads, `rasterizer` now uses two internal strategies. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones switch to a hybrid path that still clips boundary cells exactly, but fills interior spans with a scanline pass to reduce the amount of geometric clipping required. The resulting area and binary outputs stay exact at cell boundaries while scaling better on large polygons.
 
 | Binary Mode                                            | Area Mode                                          |
 | ------------------------------------------------------ | -------------------------------------------------- |
