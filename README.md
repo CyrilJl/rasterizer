@@ -6,6 +6,7 @@
 
 - Rasterize lines into a binary (presence/absence) or length-based grid.
 - Rasterize polygons into a binary (presence/absence) or area-based grid.
+- Hybrid polygon rasterization for large polygon bounding boxes: exact clipping on boundary cells, faster scanline filling for interior cells.
 - Weighted rasterization: Rasterize geometries while weighting the output by a numerical column in the GeoDataFrame.
 - Works with `geopandas` GeoDataFrames.
 - Outputs an `xarray.DataArray` for easy integration with other scientific Python libraries.
@@ -29,16 +30,18 @@ area_raster = rasterize_polygons(polys, your_x_grid, your_y_grid, polys.crs, mod
 
 You can rasterize lines in either binary or length mode.
 
-| Binary Mode | Length Mode |
-|---|---|
+| Binary Mode                                      | Length Mode                                      |
+| ------------------------------------------------ | ------------------------------------------------ |
 | ![Lines - Binary](docs/_static/lines_binary.png) | ![Lines - Length](docs/_static/lines_length.png) |
 
 ### Rasterizing Polygons
 
 You can rasterize polygons in either binary or area mode.
 
-| Binary Mode | Area Mode |
-|---|---|
+For polygon workloads, `rasterizer` now uses two internal strategies. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones switch to a hybrid path that still clips boundary cells exactly, but fills interior spans with a scanline pass to reduce the amount of geometric clipping required. The resulting area and binary outputs stay exact at cell boundaries while scaling better on large polygons.
+
+| Binary Mode                                            | Area Mode                                          |
+| ------------------------------------------------------ | -------------------------------------------------- |
 | ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
 
 ## Installation
@@ -59,6 +62,3 @@ gdalwarp -tr 10 10 -r average tmp_fine.tif out_area_approx.tif
 ```
 
 Doing this purely in `geopandas` by generating one polygon per grid cell and overlaying it with the input geometry is also slow because it creates a huge number of tiny geometries, triggers expensive overlay operations, and scales poorly with grid size.
-
-
-

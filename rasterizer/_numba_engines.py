@@ -244,6 +244,377 @@ def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarr
 
 
 @numba.jit(nopython=True)
+def _clip_polygon_cell_area_numba(
+    polygon_idx: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    cell_xmin: float,
+    cell_ymin: float,
+    cell_xmax: float,
+    cell_ymax: float,
+) -> float:
+    ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
+    exterior_coords = exteriors_coords[ext_start:ext_end]
+    clip_box = (cell_xmin, cell_ymin, cell_xmax, cell_ymax)
+    clipped_exterior = _clip_polygon_numba(exterior_coords, clip_box)
+    area = _polygon_area_numba(clipped_exterior)
+
+    poly_int_start = interiors_poly_offsets[polygon_idx]
+    poly_int_end = interiors_poly_offsets[polygon_idx + 1]
+
+    for j in range(poly_int_start, poly_int_end):
+        int_start = interiors_ring_offsets[j]
+        int_end = interiors_ring_offsets[j + 1]
+        interior_coords = interiors_coords[int_start:int_end]
+        clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
+        area -= _polygon_area_numba(clipped_interior)
+
+    return area
+
+
+@numba.jit(nopython=True)
+def _mark_boundary_cells_for_ring(
+    ring_coords: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    bbox_ix_start: int,
+    bbox_ix_end: int,
+    bbox_iy_start: int,
+    bbox_iy_end: int,
+    boundary_mask: np.ndarray,
+) -> None:
+    num_coords = len(ring_coords)
+    if num_coords == 0:
+        return
+
+    for i in range(num_coords):
+        xa, ya = ring_coords[i]
+        xb, yb = ring_coords[(i + 1) % num_coords]
+
+        seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
+        seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
+
+        ix_start = np.searchsorted(x, seg_xmin - half_dx, side="right") - 1
+        ix_end = np.searchsorted(x, seg_xmax + half_dx, side="left") + 1
+        iy_start = np.searchsorted(y, seg_ymin - half_dy, side="right") - 1
+        iy_end = np.searchsorted(y, seg_ymax + half_dy, side="left") + 1
+
+        ix_start = max(bbox_ix_start, ix_start)
+        iy_start = max(bbox_iy_start, iy_start)
+        ix_end = min(bbox_ix_end, ix_end)
+        iy_end = min(bbox_iy_end, iy_end)
+
+        for iy in range(iy_start, iy_end):
+            cell_ymin = y[iy] - half_dy
+            cell_ymax = y[iy] + half_dy
+            local_iy = iy - bbox_iy_start
+
+            for ix in range(ix_start, ix_end):
+                local_ix = ix - bbox_ix_start
+                if boundary_mask[local_iy, local_ix]:
+                    continue
+
+                cell_xmin = x[ix] - half_dx
+                cell_xmax = x[ix] + half_dx
+                clipped_length = _clip_line_cohen_sutherland_numba(
+                    xa,
+                    ya,
+                    xb,
+                    yb,
+                    cell_xmin,
+                    cell_ymin,
+                    cell_xmax,
+                    cell_ymax,
+                )
+
+                if clipped_length > 1e-12:
+                    boundary_mask[local_iy, local_ix] = 1
+
+
+@numba.jit(nopython=True)
+def _append_scanline_intersections(
+    ring_coords: np.ndarray, scan_y: float, intersections: np.ndarray, count: int
+) -> int:
+    num_coords = len(ring_coords)
+    if num_coords == 0:
+        return count
+
+    p1 = ring_coords[num_coords - 1]
+    for i in range(num_coords):
+        p2 = ring_coords[i]
+        y1 = p1[1]
+        y2 = p2[1]
+
+        if (y1 <= scan_y < y2) or (y2 <= scan_y < y1):
+            x1 = p1[0]
+            x2 = p2[0]
+            intersections[count] = x1 + (scan_y - y1) * (x2 - x1) / (y2 - y1)
+            count += 1
+
+        p1 = p2
+
+    return count
+
+
+@numba.jit(nopython=True)
+def _rasterize_polygon_bbox_exact(
+    polygon_idx: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    mode_is_binary: bool,
+    weight: float,
+    ix_start: int,
+    ix_end: int,
+    iy_start: int,
+    iy_end: int,
+    raster_data: np.ndarray,
+) -> None:
+    for iy in range(iy_start, iy_end):
+        cell_ymin = y[iy] - half_dy
+        cell_ymax = y[iy] + half_dy
+        for ix in range(ix_start, ix_end):
+            if mode_is_binary and raster_data[iy, ix]:
+                continue
+
+            cell_xmin = x[ix] - half_dx
+            cell_xmax = x[ix] + half_dx
+            area = _clip_polygon_cell_area_numba(
+                polygon_idx,
+                exteriors_coords,
+                exteriors_offsets,
+                interiors_coords,
+                interiors_ring_offsets,
+                interiors_poly_offsets,
+                cell_xmin,
+                cell_ymin,
+                cell_xmax,
+                cell_ymax,
+            )
+
+            if area > 1e-9:
+                if mode_is_binary:
+                    raster_data[iy, ix] = 1
+                else:
+                    raster_data[iy, ix] += area * weight
+
+
+@numba.jit(nopython=True)
+def _rasterize_polygon_bbox_hybrid(
+    polygon_idx: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    mode_is_binary: bool,
+    weight: float,
+    ix_start: int,
+    ix_end: int,
+    iy_start: int,
+    iy_end: int,
+    raster_data: np.ndarray,
+) -> None:
+    bbox_width = ix_end - ix_start
+    bbox_height = iy_end - iy_start
+    # Boundary cells still need exact clipping. The rest can be filled as whole
+    # cells by scanline spans because the polygon boundary does not cross them.
+    boundary_mask = np.zeros((bbox_height, bbox_width), dtype=np.uint8)
+
+    ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
+    exterior_coords = exteriors_coords[ext_start:ext_end]
+    _mark_boundary_cells_for_ring(
+        exterior_coords,
+        x,
+        y,
+        half_dx,
+        half_dy,
+        ix_start,
+        ix_end,
+        iy_start,
+        iy_end,
+        boundary_mask,
+    )
+
+    poly_int_start = interiors_poly_offsets[polygon_idx]
+    poly_int_end = interiors_poly_offsets[polygon_idx + 1]
+    total_ring_vertices = len(exterior_coords)
+
+    for j in range(poly_int_start, poly_int_end):
+        int_start = interiors_ring_offsets[j]
+        int_end = interiors_ring_offsets[j + 1]
+        interior_coords = interiors_coords[int_start:int_end]
+        total_ring_vertices += len(interior_coords)
+        _mark_boundary_cells_for_ring(
+            interior_coords,
+            x,
+            y,
+            half_dx,
+            half_dy,
+            ix_start,
+            ix_end,
+            iy_start,
+            iy_end,
+            boundary_mask,
+        )
+
+    full_cell_value = 1.0
+    if not mode_is_binary:
+        full_cell_value = 4.0 * half_dx * half_dy * weight
+
+    intersections = np.empty(total_ring_vertices, dtype=np.float64)
+    for iy in range(iy_start, iy_end):
+        scan_y = y[iy]
+        count = _append_scanline_intersections(exterior_coords, scan_y, intersections, 0)
+        for j in range(poly_int_start, poly_int_end):
+            int_start = interiors_ring_offsets[j]
+            int_end = interiors_ring_offsets[j + 1]
+            interior_coords = interiors_coords[int_start:int_end]
+            count = _append_scanline_intersections(interior_coords, scan_y, intersections, count)
+
+        if count < 2:
+            continue
+
+        sorted_intersections = np.sort(intersections[:count])
+        local_iy = iy - iy_start
+        for k in range(0, count - 1, 2):
+            x_left = sorted_intersections[k]
+            x_right = sorted_intersections[k + 1]
+            if x_right <= x_left:
+                continue
+
+            fill_ix_start = np.searchsorted(x, x_left, side="right")
+            fill_ix_end = np.searchsorted(x, x_right, side="left")
+            fill_ix_start = max(ix_start, fill_ix_start)
+            fill_ix_end = min(ix_end, fill_ix_end)
+
+            for ix in range(fill_ix_start, fill_ix_end):
+                local_ix = ix - ix_start
+                if boundary_mask[local_iy, local_ix]:
+                    continue
+                if mode_is_binary:
+                    raster_data[iy, ix] = 1
+                else:
+                    raster_data[iy, ix] += full_cell_value
+
+    for local_iy in range(bbox_height):
+        iy = iy_start + local_iy
+        cell_ymin = y[iy] - half_dy
+        cell_ymax = y[iy] + half_dy
+        for local_ix in range(bbox_width):
+            if not boundary_mask[local_iy, local_ix]:
+                continue
+
+            ix = ix_start + local_ix
+            if mode_is_binary and raster_data[iy, ix]:
+                continue
+
+            cell_xmin = x[ix] - half_dx
+            cell_xmax = x[ix] + half_dx
+            area = _clip_polygon_cell_area_numba(
+                polygon_idx,
+                exteriors_coords,
+                exteriors_offsets,
+                interiors_coords,
+                interiors_ring_offsets,
+                interiors_poly_offsets,
+                cell_xmin,
+                cell_ymin,
+                cell_xmax,
+                cell_ymax,
+            )
+
+            if area > 1e-9:
+                if mode_is_binary:
+                    raster_data[iy, ix] = 1
+                else:
+                    raster_data[iy, ix] += area * weight
+
+
+@numba.jit(nopython=True)
+def _rasterize_polygons_exact_engine(
+    num_polygons: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    x_grid_min: float,
+    x_grid_max: float,
+    y_grid_min: float,
+    y_grid_max: float,
+    mode_is_binary: bool,
+    weights: np.ndarray,
+) -> np.ndarray:
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
+    for i in range(num_polygons):
+        weight = weights[i]
+        ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
+        exterior_coords = exteriors_coords[ext_start:ext_end]
+
+        poly_xmin, poly_ymin, poly_xmax, poly_ymax = (
+            np.min(exterior_coords[:, 0]),
+            np.min(exterior_coords[:, 1]),
+            np.max(exterior_coords[:, 0]),
+            np.max(exterior_coords[:, 1]),
+        )
+
+        if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
+            continue
+
+        ix_start = np.searchsorted(x, poly_xmin - half_dx, side="right") - 1
+        ix_end = np.searchsorted(x, poly_xmax + half_dx, side="left") + 1
+        iy_start = np.searchsorted(y, poly_ymin - half_dy, side="right") - 1
+        iy_end = np.searchsorted(y, poly_ymax + half_dy, side="left") + 1
+
+        ix_start = max(0, ix_start)
+        iy_start = max(0, iy_start)
+        ix_end = min(len(x), ix_end)
+        iy_end = min(len(y), iy_end)
+
+        _rasterize_polygon_bbox_exact(
+            i,
+            exteriors_coords,
+            exteriors_offsets,
+            interiors_coords,
+            interiors_ring_offsets,
+            interiors_poly_offsets,
+            x,
+            y,
+            half_dx,
+            half_dy,
+            mode_is_binary,
+            weight,
+            ix_start,
+            ix_end,
+            iy_start,
+            iy_end,
+            raster_data,
+        )
+
+    return raster_data
+
+
+@numba.jit(nopython=True)
 def _rasterize_polygons_engine(
     num_polygons: int,
     exteriors_coords: np.ndarray,
@@ -261,6 +632,7 @@ def _rasterize_polygons_engine(
     y_grid_max: float,
     mode_is_binary: bool,
     weights: np.ndarray,
+    large_polygon_threshold_cells: int,
 ) -> np.ndarray:
     """Rasterizes polygons on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
@@ -289,34 +661,45 @@ def _rasterize_polygons_engine(
         ix_end = min(len(x), ix_end)
         iy_end = min(len(y), iy_end)
 
-        for iy in range(iy_start, iy_end):
-            for ix in range(ix_start, ix_end):
-                if mode_is_binary and raster_data[iy, ix]:
-                    continue
-
-                cell_xmin = x[ix] - half_dx
-                cell_xmax = x[ix] + half_dx
-                cell_ymin = y[iy] - half_dy
-                cell_ymax = y[iy] + half_dy
-                clip_box = (cell_xmin, cell_ymin, cell_xmax, cell_ymax)
-
-                clipped_exterior = _clip_polygon_numba(exterior_coords, clip_box)
-                area = _polygon_area_numba(clipped_exterior)
-
-                if interiors_poly_offsets.shape[0] > 0:
-                    poly_int_start = interiors_poly_offsets[i]
-                    poly_int_end = interiors_poly_offsets[i + 1]
-
-                    for j in range(poly_int_start, poly_int_end):
-                        int_start = interiors_ring_offsets[j]
-                        int_end = interiors_ring_offsets[j + 1]
-                        interior_coords = interiors_coords[int_start:int_end]
-                        clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
-                        area -= _polygon_area_numba(clipped_interior)
-
-                if area > 1e-9:
-                    if mode_is_binary:
-                        raster_data[iy, ix] = 1
-                    else:
-                        raster_data[iy, ix] += area * weight
+        bbox_cell_count = (ix_end - ix_start) * (iy_end - iy_start)
+        if bbox_cell_count <= large_polygon_threshold_cells:
+            _rasterize_polygon_bbox_exact(
+                i,
+                exteriors_coords,
+                exteriors_offsets,
+                interiors_coords,
+                interiors_ring_offsets,
+                interiors_poly_offsets,
+                x,
+                y,
+                half_dx,
+                half_dy,
+                mode_is_binary,
+                weight,
+                ix_start,
+                ix_end,
+                iy_start,
+                iy_end,
+                raster_data,
+            )
+        else:
+            _rasterize_polygon_bbox_hybrid(
+                i,
+                exteriors_coords,
+                exteriors_offsets,
+                interiors_coords,
+                interiors_ring_offsets,
+                interiors_poly_offsets,
+                x,
+                y,
+                half_dx,
+                half_dy,
+                mode_is_binary,
+                weight,
+                ix_start,
+                ix_end,
+                iy_start,
+                iy_end,
+                raster_data,
+            )
     return raster_data
