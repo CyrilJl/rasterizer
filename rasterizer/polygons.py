@@ -7,7 +7,7 @@ from ._numba_engines import _rasterize_polygons_engine
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
 # boundary cells than to clip every cell in the polygon bbox.
-_HYBRID_POLYGON_THRESHOLD_CELLS = 1024
+_HYBRID_POLYGON_THRESHOLD_CELLS = 81
 
 
 def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:

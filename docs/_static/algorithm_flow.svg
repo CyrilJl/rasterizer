@@ -29,7 +29,7 @@
     &lt;= threshold?
   </text>
   <text x="470" y="298" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#92400e">
-    currently 1024 cells in the implementation
+    currently 81 cells in the implementation
   </text>
 
   <path d="M330 260 L210 260 L210 365" stroke="#334155" stroke-width="3" marker-end="url(#arrow)" fill="none"/>
