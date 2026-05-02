@@ -173,74 +173,125 @@ def _polygon_area_numba(coords: np.ndarray) -> float:
 
 
 @numba.jit(nopython=True)
-def _clip_polygon_numba(subject_coords: np.ndarray, clip_box: tuple) -> np.ndarray:
-    """Clips a polygon to a rectangular box."""
-    xmin, ymin, xmax, ymax = clip_box
+def _clip_polygon_area_to_box_numba(
+    subject_coords: np.ndarray,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
+) -> float:
+    """Clips a polygon to a rectangular box and returns the clipped area."""
+    count = len(subject_coords)
+    if count < 3:
+        return 0.0
 
-    # Helper to clip against one edge of the clip box
-    def clip_edge(coords, edge, value):
-        # edge: 0 for left, 1 for right, 2 for bottom, 3 for top
-        output = []
-        if not len(coords):
-            return np.empty((0, 2), dtype=np.float64)
+    for i in range(count):
+        scratch_a[i, 0] = subject_coords[i, 0]
+        scratch_a[i, 1] = subject_coords[i, 1]
 
-        p1 = coords[-1]
-        for p2_idx in range(len(coords)):
-            p2 = coords[p2_idx]
-            if edge == 0:  # left
-                p1_inside = p1[0] >= value
-                p2_inside = p2[0] >= value
-            elif edge == 1:  # right
-                p1_inside = p1[0] <= value
-                p2_inside = p2[0] <= value
-            elif edge == 2:  # bottom
-                p1_inside = p1[1] >= value
-                p2_inside = p2[1] >= value
-            else:  # top
-                p1_inside = p1[1] <= value
-                p2_inside = p2[1] <= value
+    use_first_buffer = True
+    for edge in range(4):
+        if count == 0:
+            return 0.0
+
+        if use_first_buffer:
+            src = scratch_a
+            dst = scratch_b
+        else:
+            src = scratch_b
+            dst = scratch_a
+
+        value = xmin
+        if edge == 1:
+            value = xmax
+        elif edge == 2:
+            value = ymin
+        elif edge == 3:
+            value = ymax
+
+        output_count = 0
+        p1x = src[count - 1, 0]
+        p1y = src[count - 1, 1]
+        if edge == 0:
+            p1_inside = p1x >= value
+        elif edge == 1:
+            p1_inside = p1x <= value
+        elif edge == 2:
+            p1_inside = p1y >= value
+        else:
+            p1_inside = p1y <= value
+
+        for p2_idx in range(count):
+            p2x = src[p2_idx, 0]
+            p2y = src[p2_idx, 1]
+            if edge == 0:
+                p2_inside = p2x >= value
+            elif edge == 1:
+                p2_inside = p2x <= value
+            elif edge == 2:
+                p2_inside = p2y >= value
+            else:
+                p2_inside = p2y <= value
 
             if p2_inside:
-                if not p1_inside:  # p1 outside, p2 inside -> intersection
-                    # calculate intersection
-                    if edge < 2:  # vertical edge (left/right)
-                        ix = value
-                        iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                        output.append(np.array([ix, iy], dtype=np.float64))
-                    else:  # horizontal edge (bottom/top)
-                        iy = value
-                        ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                        output.append(np.array([ix, iy], dtype=np.float64))
-                output.append(p2)
-            elif p1_inside:  # p1 inside, p2 outside -> intersection
-                # calculate intersection
-                if edge < 2:  # vertical edge
-                    ix = value
-                    iy = p1[1] + (p2[1] - p1[1]) * (value - p1[0]) / (p2[0] - p1[0])
-                    output.append(np.array([ix, iy], dtype=np.float64))
-                else:  # horizontal edge
-                    iy = value
-                    ix = p1[0] + (p2[0] - p1[0]) * (value - p1[1]) / (p2[1] - p1[1])
-                    output.append(np.array([ix, iy], dtype=np.float64))
-            p1 = p2
+                if not p1_inside:
+                    if edge < 2:
+                        dst[output_count, 0] = value
+                        dst[output_count, 1] = p1y + (p2y - p1y) * (value - p1x) / (p2x - p1x)
+                    else:
+                        dst[output_count, 1] = value
+                        dst[output_count, 0] = p1x + (p2x - p1x) * (value - p1y) / (p2y - p1y)
+                    output_count += 1
+                dst[output_count, 0] = p2x
+                dst[output_count, 1] = p2y
+                output_count += 1
+            elif p1_inside:
+                if edge < 2:
+                    dst[output_count, 0] = value
+                    dst[output_count, 1] = p1y + (p2y - p1y) * (value - p1x) / (p2x - p1x)
+                else:
+                    dst[output_count, 1] = value
+                    dst[output_count, 0] = p1x + (p2x - p1x) * (value - p1y) / (p2y - p1y)
+                output_count += 1
 
-        if not output:
-            return np.empty((0, 2), dtype=np.float64)
+            p1x = p2x
+            p1y = p2y
+            p1_inside = p2_inside
 
-        # Manual vstack
-        res = np.empty((len(output), 2), dtype=np.float64)
-        for i, arr in enumerate(output):
-            res[i, 0] = arr[0]
-            res[i, 1] = arr[1]
-        return res
+        count = output_count
+        use_first_buffer = not use_first_buffer
 
-    clipped_coords = subject_coords
-    clipped_coords = clip_edge(clipped_coords, 0, xmin)
-    clipped_coords = clip_edge(clipped_coords, 1, xmax)
-    clipped_coords = clip_edge(clipped_coords, 2, ymin)
-    clipped_coords = clip_edge(clipped_coords, 3, ymax)
+    if count < 3:
+        return 0.0
 
-    return clipped_coords
+    final_coords = scratch_a if use_first_buffer else scratch_b
+    area = 0.0
+    for i in range(count):
+        j = (i + 1) % count
+        area += final_coords[i, 0] * final_coords[j, 1]
+        area -= final_coords[j, 0] * final_coords[i, 1]
+    return abs(area) / 2.0
+
+
+@numba.jit(nopython=True)
+def _polygon_max_ring_vertices_numba(
+    polygon_idx: int,
+    exteriors_offsets: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+) -> int:
+    max_vertices = exteriors_offsets[polygon_idx + 1] - exteriors_offsets[polygon_idx]
+    poly_int_start = interiors_poly_offsets[polygon_idx]
+    poly_int_end = interiors_poly_offsets[polygon_idx + 1]
+
+    for j in range(poly_int_start, poly_int_end):
+        ring_vertices = interiors_ring_offsets[j + 1] - interiors_ring_offsets[j]
+        if ring_vertices > max_vertices:
+            max_vertices = ring_vertices
+
+    return max_vertices
 
 
 @numba.jit(nopython=True)
@@ -255,12 +306,20 @@ def _clip_polygon_cell_area_numba(
     cell_ymin: float,
     cell_xmax: float,
     cell_ymax: float,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
 ) -> float:
     ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
     exterior_coords = exteriors_coords[ext_start:ext_end]
-    clip_box = (cell_xmin, cell_ymin, cell_xmax, cell_ymax)
-    clipped_exterior = _clip_polygon_numba(exterior_coords, clip_box)
-    area = _polygon_area_numba(clipped_exterior)
+    area = _clip_polygon_area_to_box_numba(
+        exterior_coords,
+        cell_xmin,
+        cell_ymin,
+        cell_xmax,
+        cell_ymax,
+        scratch_a,
+        scratch_b,
+    )
 
     poly_int_start = interiors_poly_offsets[polygon_idx]
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
@@ -269,8 +328,15 @@ def _clip_polygon_cell_area_numba(
         int_start = interiors_ring_offsets[j]
         int_end = interiors_ring_offsets[j + 1]
         interior_coords = interiors_coords[int_start:int_end]
-        clipped_interior = _clip_polygon_numba(interior_coords, clip_box)
-        area -= _polygon_area_numba(clipped_interior)
+        area -= _clip_polygon_area_to_box_numba(
+            interior_coords,
+            cell_xmin,
+            cell_ymin,
+            cell_xmax,
+            cell_ymax,
+            scratch_a,
+            scratch_b,
+        )
 
     return area
 
@@ -381,6 +447,16 @@ def _rasterize_polygon_bbox_exact(
     iy_end: int,
     raster_data: np.ndarray,
 ) -> None:
+    max_ring_vertices = _polygon_max_ring_vertices_numba(
+        polygon_idx,
+        exteriors_offsets,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
+    )
+    scratch_capacity = max_ring_vertices + 8
+    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
+    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
+
     for iy in range(iy_start, iy_end):
         cell_ymin = y[iy] - half_dy
         cell_ymax = y[iy] + half_dy
@@ -401,6 +477,8 @@ def _rasterize_polygon_bbox_exact(
                 cell_ymin,
                 cell_xmax,
                 cell_ymax,
+                scratch_a,
+                scratch_b,
             )
 
             if area > 1e-9:
@@ -438,6 +516,16 @@ def _rasterize_polygon_bbox_hybrid(
 
     ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
     exterior_coords = exteriors_coords[ext_start:ext_end]
+    max_ring_vertices = _polygon_max_ring_vertices_numba(
+        polygon_idx,
+        exteriors_offsets,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
+    )
+    scratch_capacity = max_ring_vertices + 8
+    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
+    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
+
     _mark_boundary_cells_for_ring(
         exterior_coords,
         x,
@@ -537,6 +625,8 @@ def _rasterize_polygon_bbox_hybrid(
                 cell_ymin,
                 cell_xmax,
                 cell_ymax,
+                scratch_a,
+                scratch_b,
             )
 
             if area > 1e-9:
