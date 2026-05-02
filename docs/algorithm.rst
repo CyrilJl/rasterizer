@@ -16,7 +16,7 @@ Polygon rasterization has two competing costs:
 - small polygon bounding boxes use an exact engine that clips the polygon against every candidate cell
 - larger polygon bounding boxes use a hybrid engine that clips only boundary cells exactly and fills the interior with scanline spans
 
-The switch happens from an internal bbox-size threshold measured in grid cells. In the current implementation, that threshold is ``1024`` cells.
+The switch happens from an internal bbox-size threshold measured in grid cells. In the current implementation, that threshold is ``81`` cells.
 
 .. figure:: _static/algorithm_flow.svg
    :alt: Flow chart showing the switch between the exact and hybrid polygon rasterization paths.
@@ -71,3 +71,67 @@ The expensive part of exact polygon rasterization is repeated clipping against m
 - holes are handled naturally because their rings participate in both boundary marking and scanline intersections
 
 In practice, this keeps the simple exact behavior for small cases and reduces clipping work substantially for large polygons.
+
+Benchmark-Driven Threshold Tuning
+---------------------------------
+
+The switch threshold was not chosen heuristically. It was tuned by forcing both engines on the same synthetic corpus and comparing their measured runtimes.
+
+Benchmark process
+^^^^^^^^^^^^^^^^^
+
+The local benchmark used during tuning forces the polygon engine into one path or the other by setting the internal threshold to extremes:
+
+- ``10**9`` forces the exact per-cell clipping path
+- ``0`` forces the hybrid path for every polygon bbox
+
+Each sampled case is then rasterized twice, once with each forced path, on the same grid and in the same mode. The checked-in benchmark dataset in ``docs/_static/polygon_threshold_benchmark.csv`` contains ``780`` measured cases. It was generated from a local benchmark harness that is intentionally kept outside version control.
+
+The corpus varies several factors that matter for the crossover:
+
+- bbox size on the target grid, from a few dozen cells to several thousand
+- occupancy ratio, measured as ``polygon_area / discrete_bbox_area``
+- boundary complexity, including smooth shapes, diagonal edges, concave outlines, thin strips, comb-like geometries, and polygons with holes
+- topology, including both single polygons and multipolygons
+- grid alignment, by applying several sub-cell translations and small rotations
+- rasterization mode, in both ``mode="binary"`` and ``mode="area"``
+
+.. figure:: _static/polygon_threshold_corpus.svg
+   :alt: Representative benchmark corpus showing dense, sparse, holed, concave, thin, and multipolygon shapes.
+   :align: center
+
+   Representative shape families used in the benchmark corpus. The goal was to span occupancy, topology, and boundary complexity rather than optimize for one easy polygon class.
+
+Why Occupancy Matters
+^^^^^^^^^^^^^^^^^^^^^
+
+Occupancy changes the balance between the two engines:
+
+- the exact path pays roughly for every candidate cell in the polygon bbox
+- the hybrid path pays more for boundary cells, scanline crossings, and ring complexity, but it avoids re-clipping large fully interior regions
+
+That means two polygons with the same bbox size can have different crossovers if one is dense and the other is mostly empty space or holes.
+
+.. figure:: _static/polygon_threshold_speedup.svg
+   :alt: Scatter plot of exact over hybrid runtime against bbox size, colored by occupancy bucket.
+   :align: center
+
+   Each point is one measured case. Values above ``1`` mean the hybrid path was faster. Hybrid speedups grow with bbox size, but low-occupancy and hole-heavy polygons were also sampled explicitly so the switch was not tuned only for dense shapes.
+
+Selecting The Cutoff
+^^^^^^^^^^^^^^^^^^^^
+
+For every candidate threshold, the benchmark computes the aggregate runtime obtained by choosing:
+
+- the exact path when ``bbox_cells <= threshold``
+- the hybrid path otherwise
+
+The resulting curve is shallow near the optimum: several very small thresholds perform almost the same. In the current benchmark snapshot, the best observed aggregate time lands at the lowest tested cutoff, but ``81`` cells stays within about ``0.11%`` of that best total while still reserving the exact path for genuinely tiny polygon bboxes.
+
+.. figure:: _static/polygon_threshold_curve.svg
+   :alt: Aggregate threshold-search curve showing that the performance optimum is broad and close to very small cutoffs.
+   :align: center
+
+   Aggregate runtime relative to the best observed threshold on the sampled corpus. The important result is not a sharp single optimum, but that the old large cutoff was clearly too high and that the useful regime sits among very small bbox thresholds.
+
+In other words, the benchmark supports a policy more than a magic number: keep the exact path only for very small polygon bboxes, and switch to hybrid early.
