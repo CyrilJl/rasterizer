@@ -85,11 +85,11 @@ The local benchmark used during tuning forces the polygon engine into one path o
 - ``10**9`` forces the exact per-cell clipping path
 - ``0`` forces the hybrid path for every polygon bbox
 
-Each sampled case is then rasterized twice, once with each forced path, on the same grid and in the same mode. The checked-in benchmark dataset in ``docs/_static/polygon_threshold_benchmark.csv`` contains ``780`` measured cases. It was generated from a local benchmark harness that is intentionally kept outside version control.
+Each sampled case is then rasterized twice, once with each forced path, on the same grid and in the same mode. The checked-in benchmark dataset in ``docs/_static/polygon_threshold_benchmark.csv`` contains ``1020`` measured cases. It was generated from a local benchmark harness that is intentionally kept outside version control.
 
 The corpus varies several factors that matter for the crossover:
 
-- bbox size on the target grid, from a few dozen cells to several thousand
+- bbox size on the target grid, from a few dozen cells to well into the tens of thousands
 - occupancy ratio, measured as ``polygon_area / discrete_bbox_area``
 - boundary complexity, including smooth shapes, diagonal edges, concave outlines, thin strips, comb-like geometries, and polygons with holes
 - topology, including both single polygons and multipolygons
@@ -126,7 +126,7 @@ For every candidate threshold, the benchmark computes the aggregate runtime obta
 - the exact path when ``bbox_cells <= threshold``
 - the hybrid path otherwise
 
-The resulting curve is shallow near the optimum: several very small thresholds perform almost the same. In the current benchmark snapshot, the best observed aggregate time lands at the lowest tested cutoff, but ``81`` cells stays within about ``0.11%`` of that best total while still reserving the exact path for genuinely tiny polygon bboxes.
+The resulting curve is shallow near the optimum: several very small thresholds perform almost the same. In the current benchmark snapshot, the best observed aggregate time lands at the lowest tested cutoff, but ``81`` cells stays within about ``0.06%`` of that best total while still reserving the exact path for genuinely tiny polygon bboxes.
 
 .. figure:: _static/polygon_threshold_curve.svg
    :alt: Aggregate threshold-search curve showing that the performance optimum is broad and close to very small cutoffs.
