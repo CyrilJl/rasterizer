@@ -147,7 +147,18 @@ def generate_corpus_overview():
     fig.patch.set_facecolor("#f8fafc")
     axes = axes.ravel()
 
-    palette = ["#dbeafe", "#e0f2fe", "#fef3c7", "#fee2e2", "#fecaca", "#dcfce7", "#ede9fe", "#fae8ff", "#ffe4e6", "#e2e8f0"]
+    palette = [
+        "#dbeafe",
+        "#e0f2fe",
+        "#fef3c7",
+        "#fee2e2",
+        "#fecaca",
+        "#dcfce7",
+        "#ede9fe",
+        "#fae8ff",
+        "#ffe4e6",
+        "#e2e8f0",
+    ]
     for ax, (name, geometry, note), color in zip(axes, FAMILIES, palette, strict=False):
         _plot_geometry(ax, geometry, color)
         ax.add_patch(plt.Rectangle((-1.02, -1.02), 2.04, 2.04, facecolor="none", edgecolor="#94a3b8", linewidth=1.0))
@@ -161,7 +172,9 @@ def generate_corpus_overview():
         ax.set_title(name.title(), fontsize=11, fontweight="bold", pad=6)
         ax.text(0.5, -0.12, note, transform=ax.transAxes, ha="center", va="top", fontsize=8.8, color="#334155")
 
-    fig.suptitle("Benchmark Corpus: Occupancy, Holes, Concavity, And Boundary Complexity", fontsize=16, fontweight="bold")
+    fig.suptitle(
+        "Benchmark Corpus: Occupancy, Holes, Concavity, And Boundary Complexity", fontsize=16, fontweight="bold"
+    )
     fig.subplots_adjust(left=0.03, right=0.99, top=0.86, bottom=0.11, wspace=0.18, hspace=0.5)
     fig.savefig(SAVE_PATH / "polygon_threshold_corpus.svg", format="svg", bbox_inches="tight")
     plt.close(fig)
@@ -198,12 +211,39 @@ def generate_speedup_scatter(cases):
     ax.grid(True, axis="x", color="#e2e8f0", linewidth=0.6, alpha=0.6)
 
     occupancy_handles = [
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=color, markeredgecolor="#0f172a", markersize=7, label=bucket)
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor=color,
+            markeredgecolor="#0f172a",
+            markersize=7,
+            label=bucket,
+        )
         for bucket, color in OCCUPANCY_COLORS.items()
     ]
     mode_handles = [
-        Line2D([0], [0], marker="o", color="#0f172a", markerfacecolor="white", linestyle="None", markersize=7, label='binary mode'),
-        Line2D([0], [0], marker="^", color="#0f172a", markerfacecolor="white", linestyle="None", markersize=7, label='area mode'),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="#0f172a",
+            markerfacecolor="white",
+            linestyle="None",
+            markersize=7,
+            label="binary mode",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="^",
+            color="#0f172a",
+            markerfacecolor="white",
+            linestyle="None",
+            markersize=7,
+            label="area mode",
+        ),
     ]
     legend1 = ax.legend(handles=occupancy_handles, title="Occupancy bucket", loc="upper left", frameon=False)
     ax.add_artist(legend1)
