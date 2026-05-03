@@ -15,6 +15,14 @@
 
 For detailed usage and API documentation, please see the [full documentation](https://rasterizer.readthedocs.io).
 
+## Installation
+
+You can install the package directly from PyPI:
+
+```bash
+pip install rasterizer
+```
+
 ## Usage
 
 Here are some examples of what you can do with `rasterizer`.
@@ -36,6 +44,24 @@ area_raster = rasterize_polygons(
     progress_bar=True,
 )
 ```
+
+### Rasterizing Lines
+
+You can rasterize lines in either binary or length mode.
+
+| Binary Mode                                      | Length Mode                                      |
+| ------------------------------------------------ | ------------------------------------------------ |
+| ![Lines - Binary](docs/_static/lines_binary.png) | ![Lines - Length](docs/_static/lines_length.png) |
+
+### Rasterizing Polygons
+
+You can rasterize polygons in either binary or area mode.
+
+For polygon workloads, `rasterizer` now uses two internal strategies. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones switch to a hybrid path that still clips boundary cells exactly, but fills interior spans with a scanline pass to reduce the amount of geometric clipping required. The resulting area and binary outputs stay exact at cell boundaries while scaling better on large polygons.
+
+| Binary Mode                                            | Area Mode                                          |
+| ------------------------------------------------------ | -------------------------------------------------- |
+| ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
 
 ### Large Dataset Showcase
 
@@ -62,32 +88,6 @@ coverage = rasterize_polygons(buildings, x=x, y=y, crs=buildings.crs, mode="area
 ![Large dataset showcase](docs/_static/large_dataset_showcase.png)
 
 The full walkthrough, including the benchmark context and reproduction script, is available in the [large dataset showcase documentation](https://rasterizer.readthedocs.io/en/latest/large_dataset_showcase.html).
-
-### Rasterizing Lines
-
-You can rasterize lines in either binary or length mode.
-
-| Binary Mode                                      | Length Mode                                      |
-| ------------------------------------------------ | ------------------------------------------------ |
-| ![Lines - Binary](docs/_static/lines_binary.png) | ![Lines - Length](docs/_static/lines_length.png) |
-
-### Rasterizing Polygons
-
-You can rasterize polygons in either binary or area mode.
-
-For polygon workloads, `rasterizer` now uses two internal strategies. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones switch to a hybrid path that still clips boundary cells exactly, but fills interior spans with a scanline pass to reduce the amount of geometric clipping required. The resulting area and binary outputs stay exact at cell boundaries while scaling better on large polygons.
-
-| Binary Mode                                            | Area Mode                                          |
-| ------------------------------------------------------ | -------------------------------------------------- |
-| ![Polygons - Binary](docs/_static/polygons_binary.png) | ![Polygons - Area](docs/_static/polygons_area.png) |
-
-## Installation
-
-You can install the package directly from PyPI:
-
-```bash
-pip install rasterizer
-```
 
 ## Why rasterizer
 
