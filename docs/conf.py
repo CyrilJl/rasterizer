@@ -20,11 +20,13 @@ author = "Cyril Joly"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
+    "myst_nb",
     "sphinxawesome_theme",
 ]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+nb_execution_mode = "off"
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -38,6 +40,7 @@ html_title = project
 html_theme_options = {
     "main_nav_links": {
         "Usage": "usage",
+        "Large Dataset": "large_dataset_showcase",
         "Algorithm Notes": "algorithm",
         "API Reference": "api",
     },

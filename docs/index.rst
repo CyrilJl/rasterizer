@@ -48,5 +48,6 @@ cell centers with constant spacing, which define a regular rectilinear grid.
    :hidden:
 
    usage
+   large_dataset_showcase
    algorithm
    api

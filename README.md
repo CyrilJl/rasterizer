@@ -37,6 +37,32 @@ area_raster = rasterize_polygons(
 )
 ```
 
+### Large Dataset Showcase
+
+This real-world example uses 606,667 building polygons on a 10 m Lambert-93 grid covering Paris. The `area` rasterization step completes in 13.1 s on a regular laptop used as the local documentation machine for a `2804 x 1978` grid.
+
+```python
+import geopandas as gpd
+import numpy as np
+from rasterizer import rasterize_polygons
+
+buildings = gpd.read_file(
+    "BDT_3-5_GPKG_LAMB93_D075-ED2026-03-15.gpkg",
+    layer="batiment",
+    columns=[],
+)
+
+xmin, ymin, xmax, ymax = buildings.total_bounds
+x = np.arange(xmin, xmax, 10.0)
+y = np.arange(ymin, ymax, 10.0)
+
+coverage = rasterize_polygons(buildings, x=x, y=y, crs=buildings.crs, mode="area")
+```
+
+![Large dataset showcase](docs/_static/large_dataset_showcase.png)
+
+The full walkthrough, including the benchmark context and reproduction script, is available in the [large dataset showcase documentation](https://rasterizer.readthedocs.io/en/latest/large_dataset_showcase.html).
+
 ### Rasterizing Lines
 
 You can rasterize lines in either binary or length mode.

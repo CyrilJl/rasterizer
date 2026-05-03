@@ -1,0 +1,31 @@
+{
+  "dataset_path": "dev/data/BDT_3-5_GPKG_LAMB93_D075-ED2026-03-15.gpkg",
+  "layer_name": "batiment",
+  "polygon_count": 606667,
+  "crs": "EPSG:2154",
+  "resolution_m": 10.0,
+  "grid_shape": [
+    1978,
+    2804
+  ],
+  "grid_cells": 5546312,
+  "bounds": {
+    "xmin": 638111.9,
+    "ymin": 6852412.0,
+    "xmax": 666143.1,
+    "ymax": 6872190.3
+  },
+  "positive_cells": 2195409,
+  "max_cell_area_m2": 200.0,
+  "read_seconds": 2.811,
+  "rasterize_seconds": 11.204,
+  "total_seconds": 18.626,
+  "python_version": "3.13.12",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "cpu_count": 16,
+  "image_path": "docs/_static/large_dataset_showcase.png",
+  "color_scale": {
+    "vmin_quantile_20": 23.73095703125,
+    "vmax_quantile_99_8": 200.0
+  }
+}
