@@ -1,12 +1,11 @@
-from typing import Any, TypeVar, cast
 import warnings
 from contextlib import nullcontext
+from typing import Any, TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
 import rioxarray
 import xarray as xr
-
 
 XRaster = TypeVar("XRaster", xr.DataArray, xr.Dataset)
 
