@@ -2,6 +2,8 @@ Algorithm Notes
 ===============
 
 This page summarizes the polygon rasterization strategy used by ``rasterizer``.
+The speed-ups described here rely on the package specializing in regular rectilinear grids with constant cell
+spacing.
 
 Overview
 --------
@@ -10,6 +12,9 @@ Polygon rasterization has two competing costs:
 
 - exact per-cell clipping is straightforward and robust, but it becomes expensive when a polygon covers a large bounding box on the target grid
 - bulk filling is much faster for polygon interiors, but it still needs exact handling near the polygon boundary
+
+Because the target grid is regular and axis-aligned, ``rasterizer`` can turn that structure into simpler index
+math and faster scanline-style filling than a general rasterization engine can usually assume.
 
 ``rasterizer`` therefore uses two internal paths for polygons:
 

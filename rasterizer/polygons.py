@@ -57,12 +57,15 @@ def rasterize_polygons(
     weight: str = None,
 ) -> xr.DataArray:
     """
-    Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular grid.
+    Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular,
+    axis-aligned rectangular grid.
 
     Args:
         polygons (gpd.GeoDataFrame): GeoDataFrame containing the polygon geometries.
-        x (np.ndarray): 1D array of x-coordinates of the cell centers.
-        y (np.ndarray): 1D array of y-coordinates of the cell centers.
+        x (np.ndarray): 1D array of x-coordinates of the cell centers, with
+            constant spacing.
+        y (np.ndarray): 1D array of y-coordinates of the cell centers, with
+            constant spacing.
         crs: The coordinate reference system of the output grid.
         mode (str, optional): 'binary' or 'area'. Defaults to 'area'.
             - 'binary': the cell is True if covered, False otherwise.

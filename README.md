@@ -1,11 +1,12 @@
 # Rasterizer
 
-`rasterizer` is a lightweight Python package for rasterizing `geopandas` GeoDataFrames.
+`rasterizer` is a lightweight Python package that speeds up rasterization of `geopandas` GeoDataFrames by specializing in regular, axis-aligned rectangular grids.
 
 ## Features
 
 - Rasterize lines into a binary (presence/absence) or length-based grid.
 - Rasterize polygons into a binary (presence/absence) or area-based grid.
+- Fast because it targets regular rectilinear grids described by 1D `x` and `y` cell-center coordinates with constant spacing.
 - Hybrid polygon rasterization for large polygon bounding boxes: exact clipping on boundary cells, faster scanline filling for interior cells.
 - Weighted rasterization: Rasterize geometries while weighting the output by a numerical column in the GeoDataFrame.
 - Works with `geopandas` GeoDataFrames.
@@ -54,7 +55,7 @@ pip install rasterizer
 
 ## Why rasterizer
 
-This package provides functionalities that are not present in `rasterio.features`, such as area and length-based rasterization. It is also lighter and faster than using GDAL-based solutions. GDAL's rasterization only burns values per pixel; it cannot return exact fractional area or length contributions without an expensive workaround. The common workaround is to rasterize at a much finer resolution and then downsample with averaging, which approximates the true area/length but is not exact and can be slow, e.g.:
+This package provides functionalities that are not present in `rasterio.features`, such as area and length-based rasterization. It is also lighter and faster than using more general GDAL-based solutions because it is specialized for regular rectilinear grids instead of arbitrary raster layouts. GDAL's rasterization only burns values per pixel; it cannot return exact fractional area or length contributions without an expensive workaround. The common workaround is to rasterize at a much finer resolution and then downsample with averaging, which approximates the true area/length but is not exact and can be slow, e.g.:
 
 ```bash
 gdal_rasterize -burn 1 -tr 1 1 -ot Float32 -of GTiff input.gpkg tmp_fine.tif
@@ -62,3 +63,5 @@ gdalwarp -tr 10 10 -r average tmp_fine.tif out_area_approx.tif
 ```
 
 Doing this purely in `geopandas` by generating one polygon per grid cell and overlaying it with the input geometry is also slow because it creates a huge number of tiny geometries, triggers expensive overlay operations, and scales poorly with grid size.
+
+That speed-up comes with a deliberate constraint: `rasterizer` is built for regular, axis-aligned rectangular grids, not for arbitrary affine transforms or irregular meshes.

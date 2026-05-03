@@ -6,10 +6,11 @@
 rasterizer
 ==========
 
-``rasterizer`` is a Python library for rasterizing vector data (lines and polygons) onto a regular grid. It
-was developed to handle rasterization based on the length or area of intersection with each grid cell, which
-is a feature not readily available in other libraries like Rasterio or GDAL. It is designed to be fast and
-memory-efficient, especially for large grids and large GeoDataFrames, using a Numba-accelerated implementation.
+``rasterizer`` is a Python library for rasterizing vector data (lines and polygons) onto a regular,
+axis-aligned rectangular grid. It was developed to handle rasterization based on the length or area of
+intersection with each grid cell, which is a feature not readily available in other libraries like Rasterio
+or GDAL. It is designed to be fast and memory-efficient because it specializes in this regular-grid case,
+using a Numba-accelerated implementation instead of supporting arbitrary raster layouts.
 
 For example, you can rasterize polygons like this:
 
@@ -20,9 +21,9 @@ For example, you can rasterize polygons like this:
     from rasterizer import rasterize_polygons
 
     # Assuming `polygons` is your GeoDataFrame
-    # and `x`, `y`, `crs` are defined for your grid
+    # and `x`, `y`, `crs` define a regular rectilinear grid
     raster = rasterize_polygons(
-        polygons=gdf,
+        polygons=polygons,
         x=x,
         y=y,
         crs=crs,
@@ -36,6 +37,9 @@ You can install ``rasterizer`` using PyPI:
 .. code-block:: bash
 
    pip install rasterizer
+
+The practical tradeoff is intentional: ``rasterizer`` gains speed by assuming 1D ``x`` and ``y`` arrays of
+cell centers with constant spacing, which define a regular rectilinear grid.
 
 .. toctree::
    :maxdepth: 1
