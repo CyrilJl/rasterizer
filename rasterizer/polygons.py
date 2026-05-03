@@ -1,8 +1,10 @@
+from typing import cast
+
 import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from ._misc import geocode, maybe_progress_bar
+from ._misc import geocode, geometry_series, maybe_progress_bar, prepare_vector_input
 from ._numba_engines import _rasterize_polygons_engine, _rasterize_polygons_range_engine
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
@@ -11,23 +13,29 @@ _HYBRID_POLYGON_THRESHOLD_CELLS = 81
 _PROGRESS_CHUNK_SIZE = 128
 
 
-def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
-    """
-    Computes the exterior coordinates of a GeoDataFrame of polygons.
-    """
-    return gdf_poly.explode().geometry.exterior.get_coordinates().reset_index().values
+def _explode_polygons(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoDataFrame | gpd.GeoSeries:
+    if isinstance(polygons, gpd.GeoDataFrame):
+        return cast(gpd.GeoDataFrame, polygons.explode(index_parts=False, ignore_index=True))
+    return polygons.explode(index_parts=False, ignore_index=True)
 
 
-def compute_interiors(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
+def compute_exterior(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
     """
-    Computes the interior coordinates of a GeoDataFrame of polygons.
+    Computes the exterior coordinates of polygons.
+    """
+    return geometry_series(polygons).explode().exterior.get_coordinates().reset_index().values
+
+
+def compute_interiors(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
+    """
+    Computes the interior coordinates of polygons.
     """
     # this is much faster than naively exploding all interiors
-    gdf_interiors = gdf_poly[gdf_poly.geometry.count_interior_rings() > 0]
-    if gdf_interiors.empty:
+    geom = geometry_series(polygons)
+    interiors = geom[geom.count_interior_rings() > 0].interiors
+    if interiors.empty:
         return np.empty((0, 4), dtype=np.float64)
 
-    interiors = gdf_interiors.geometry.interiors
     ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
     if ret.empty:
         return np.empty((0, 4), dtype=np.float64)
@@ -50,12 +58,12 @@ def _empty_polygon_raster(x: np.ndarray, y: np.ndarray, crs, mode: str) -> xr.Da
 
 
 def rasterize_polygons(
-    polygons: gpd.GeoDataFrame,
+    polygons: gpd.GeoDataFrame | gpd.GeoSeries,
     x: np.ndarray,
     y: np.ndarray,
-    crs,
+    crs=None,
     mode: str = "area",
-    weight: str = None,
+    weight: str | None = None,
     progress_bar: bool = False,
 ) -> xr.DataArray:
     """
@@ -63,12 +71,14 @@ def rasterize_polygons(
     axis-aligned rectangular grid.
 
     Args:
-        polygons (gpd.GeoDataFrame): GeoDataFrame containing the polygon geometries.
+        polygons (gpd.GeoDataFrame | gpd.GeoSeries): Geospatial vector data
+            containing the polygon geometries.
         x (np.ndarray): 1D array of x-coordinates of the cell centers, with
             constant spacing.
         y (np.ndarray): 1D array of y-coordinates of the cell centers, with
             constant spacing.
-        crs: The coordinate reference system of the output grid.
+        crs: The coordinate reference system of the output grid. If None,
+            infer it from ``polygons`` when available.
         mode (str, optional): 'binary' or 'area'. Defaults to 'area'.
             - 'binary': the cell is True if covered, False otherwise.
             - 'area': the cell contains the area of the polygon that covers it.
@@ -90,18 +100,7 @@ def rasterize_polygons(
     if weight is not None:
         if mode == "binary":
             raise ValueError("Weight argument is not supported for binary mode.")
-        if weight not in polygons.columns:
-            raise ValueError(f"Weight column '{weight}' not found in GeoDataFrame.")
-        if not np.issubdtype(np.asarray(polygons[weight]).dtype, np.number):
-            raise ValueError(f"Weight column '{weight}' must be numeric.")
-
-    polygons = polygons.copy()
-    polygons.geometry = polygons.geometry.force_2d()
-
-    geom_types = polygons.geometry.geom_type
-    polygons = polygons[geom_types.isin(["Polygon", "MultiPolygon"])]
-
-    polygons_proj = polygons.to_crs(crs)
+    polygons_proj, crs = prepare_vector_input(polygons, crs, ["Polygon", "MultiPolygon"], weight=weight)
 
     if len(x) < 2 or len(y) < 2:
         return _empty_polygon_raster(x, y, crs, mode)
@@ -114,18 +113,19 @@ def rasterize_polygons(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    polygons_proj = polygons_proj.cx[x_grid_min:x_grid_max, y_grid_min:y_grid_max]
+    polygons_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, polygons_proj.cx[x_grid_min:x_grid_max, y_grid_min:y_grid_max])
 
     if mode != "binary":
         polygons_proj = polygons_proj[polygons_proj.area > 0]
+        polygons_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, polygons_proj)
 
     if polygons_proj.empty:
         return _empty_polygon_raster(x, y, crs, mode)
 
     if weight is not None:
-        polygons_proj = polygons_proj.assign(__polygon_area=polygons_proj.area)
+        polygons_proj = cast(gpd.GeoDataFrame, polygons_proj.assign(__polygon_area=polygons_proj.area))
 
-    polygons_proj = polygons_proj.explode(index_parts=False, ignore_index=True)
+    polygons_proj = _explode_polygons(polygons_proj)
     num_polygons = len(polygons_proj)
 
     if weight is not None:

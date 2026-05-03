@@ -146,6 +146,39 @@ def test_rasterize_lines(grid, grid_gdf):
     np.testing.assert_array_equal(raster_bin.values, expected_bin)
 
 
+def test_rasterize_lines_geoseries_infers_crs(grid):
+    gdf_lines = gpd.GeoDataFrame(
+        geometry=[LineString([(0, 0), (10, 10)]), LineString([(10, 0), (10, 10)])],
+        crs=CRS,
+    )
+
+    raster_gdf = rasterize_lines(gdf_lines, x=grid["x"], y=grid["y"], mode="length")
+    raster_series = rasterize_lines(gdf_lines.geometry, x=grid["x"], y=grid["y"], mode="length")
+
+    np.testing.assert_allclose(raster_series.values, raster_gdf.values)
+    assert str(raster_series.rio.crs) == CRS
+
+
+def test_rasterize_lines_without_any_crs_is_supported(grid):
+    geometry = [LineString([(0, 0), (10, 10)]), LineString([(10, 0), (10, 10)])]
+    gdf_lines = gpd.GeoDataFrame(geometry=geometry, crs=None)
+    expected = rasterize_lines(gpd.GeoDataFrame(geometry=geometry, crs=CRS), **grid, mode="length")
+
+    raster = rasterize_lines(gdf_lines, x=grid["x"], y=grid["y"], mode="length")
+
+    np.testing.assert_allclose(raster.values, expected.values)
+    assert raster.rio.crs is None
+
+
+def test_rasterize_lines_crsless_input_accepts_explicit_output_crs(grid):
+    gdf_lines = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 10)])], crs=None)
+
+    with pytest.warns(UserWarning, match="Input has no CRS"):
+        raster = rasterize_lines(gdf_lines, x=grid["x"], y=grid["y"], crs=CRS, mode="length")
+
+    assert str(raster.rio.crs) == CRS
+
+
 def test_rasterize_polygons(grid, grid_gdf):
     """
     Test the correctness of polygon rasterization by comparing with geopandas overlay.
@@ -169,6 +202,36 @@ def test_rasterize_polygons(grid, grid_gdf):
     raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
     expected_bin = expected_areas > 0
     np.testing.assert_array_equal(raster_bin.values, expected_bin)
+
+
+def test_rasterize_polygons_geoseries_infers_crs(grid):
+    gdf_polygons = gpd.GeoDataFrame(geometry=[box(0, 0, 10, 10), box(20, 20, 30, 30)], crs=CRS)
+
+    raster_gdf = rasterize_polygons(gdf_polygons, x=grid["x"], y=grid["y"], mode="area")
+    raster_series = rasterize_polygons(gdf_polygons.geometry, x=grid["x"], y=grid["y"], mode="area")
+
+    np.testing.assert_allclose(raster_series.values, raster_gdf.values)
+    assert str(raster_series.rio.crs) == CRS
+
+
+def test_rasterize_polygons_without_any_crs_is_supported(grid):
+    geometry = [box(0, 0, 10, 10), box(20, 20, 30, 30)]
+    gdf_polygons = gpd.GeoDataFrame(geometry=geometry, crs=None)
+    expected = rasterize_polygons(gpd.GeoDataFrame(geometry=geometry, crs=CRS), **grid, mode="area")
+
+    raster = rasterize_polygons(gdf_polygons, x=grid["x"], y=grid["y"], mode="area")
+
+    np.testing.assert_allclose(raster.values, expected.values)
+    assert raster.rio.crs is None
+
+
+def test_rasterize_polygons_crsless_input_accepts_explicit_output_crs(grid):
+    gdf_polygons = gpd.GeoDataFrame(geometry=[box(0, 0, 10, 10)], crs=None)
+
+    with pytest.warns(UserWarning, match="Input has no CRS"):
+        raster = rasterize_polygons(gdf_polygons, x=grid["x"], y=grid["y"], crs=CRS, mode="area")
+
+    assert str(raster.rio.crs) == CRS
 
 
 def test_rasterize_polygons_with_weight(grid, grid_gdf):
@@ -212,6 +275,9 @@ def test_rasterize_polygons_weight_errors(grid):
 
     with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
         rasterize_polygons(gdf_polygons, **grid, mode="area", weight="non_numeric_weight")
+
+    with pytest.raises(ValueError, match="Weight argument requires a GeoDataFrame input."):
+        rasterize_polygons(gdf_polygons.geometry, x=grid["x"], y=grid["y"], mode="area", weight="weight")
 
 
 def _make_donut_polygon():
@@ -344,6 +410,9 @@ def test_rasterize_lines_weight_errors(grid):
 
     with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
         rasterize_lines(gdf_lines, **grid, mode="length", weight="non_numeric_weight")
+
+    with pytest.raises(ValueError, match="Weight argument requires a GeoDataFrame input."):
+        rasterize_lines(gdf_lines.geometry, x=grid["x"], y=grid["y"], mode="length", weight="weight")
 
 
 class _FakeProgressBar:

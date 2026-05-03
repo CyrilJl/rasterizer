@@ -16,14 +16,15 @@ Rasterizing Lines
 ~~~~~~~~~~~~~~~~~
 
 You can rasterize lines in either binary or length mode, with ``x`` and ``y`` two 1D arrays describing a
-regular rectilinear grid, and ``crs`` anything parsable by ``pyproj``.
+regular rectilinear grid. ``lines`` can be either a ``GeoDataFrame`` or ``GeoSeries``. ``crs`` is optional:
+if omitted, it is inferred from the input when available, otherwise the raster is returned without CRS metadata.
 
 .. code-block:: python
 
    from rasterizer import rasterize_lines
 
-   raster_binary = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='binary')
-   raster_length = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='length')
+   raster_binary = rasterize_lines(lines=gdf, x=x, y=y, mode='binary')
+   raster_length = rasterize_lines(lines=gdf.geometry, x=x, y=y, mode='length')
    raster_length = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='length', progress_bar=True)
 
 .. list-table::
@@ -38,13 +39,15 @@ Rasterizing Polygons
 ~~~~~~~~~~~~~~~~~~~~
 
 You can rasterize polygons in either binary or area mode on the same kind of regular rectilinear grid.
+``polygons`` can be either a ``GeoDataFrame`` or ``GeoSeries``. ``crs`` follows the same optional inference
+rules as for lines.
 
 .. code-block:: python
 
    from rasterizer import rasterize_polygons
 
-   raster_binary = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='binary')
-   raster_area = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='area')
+   raster_binary = rasterize_polygons(polygons=gdf, x=x, y=y, mode='binary')
+   raster_area = rasterize_polygons(polygons=gdf.geometry, x=x, y=y, mode='area')
    raster_area = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='area', progress_bar=True)
 
 .. list-table::

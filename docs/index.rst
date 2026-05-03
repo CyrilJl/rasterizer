@@ -20,18 +20,17 @@ For example, you can rasterize polygons like this:
     import numpy as np
     from rasterizer import rasterize_polygons
 
-    # Assuming `polygons` is your GeoDataFrame
-    # and `x`, `y`, `crs` define a regular rectilinear grid
+    # `polygons` can be a GeoDataFrame or GeoSeries.
+    # If `crs` is omitted, it is inferred from the input when available.
     raster = rasterize_polygons(
         polygons=polygons,
         x=x,
         y=y,
-        crs=crs,
         mode='area',
         weight='your_weight_column', # or None
         progress_bar=False,
     )
-    # `raster` is a properly georeferenced xarray.DataArray
+    # `raster` is an xarray.DataArray with spatial dims and, when available, CRS metadata
 
 You can install ``rasterizer`` using PyPI:
 
