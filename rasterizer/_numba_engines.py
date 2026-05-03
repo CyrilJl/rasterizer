@@ -78,9 +78,12 @@ def _clip_line_cohen_sutherland_numba(
 
 
 @numba.jit(nopython=True)
-def _rasterize_lines_engine(
+def _rasterize_lines_range_engine(
     geoms: np.ndarray,
+    line_offsets: np.ndarray,
     line_weights: np.ndarray,
+    start_line_idx: int,
+    end_line_idx: int,
     x: np.ndarray,
     y: np.ndarray,
     dx: float,
@@ -92,14 +95,14 @@ def _rasterize_lines_engine(
     y_grid_min: float,
     y_grid_max: float,
     mode_is_binary: bool,
-) -> np.ndarray:
-    """Rasterizes lines on a grid."""
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-    for i in range(len(geoms) - 1):
-        # Check if the current and next points belong to the same line
-        if geoms[i, 0] == geoms[i + 1, 0]:
-            line_idx = int(geoms[i, 0])
-            weight = line_weights[line_idx]
+    raster_data: np.ndarray,
+) -> None:
+    for line_idx in range(start_line_idx, end_line_idx):
+        weight = line_weights[line_idx]
+        coord_start = line_offsets[line_idx]
+        coord_end = line_offsets[line_idx + 1]
+
+        for i in range(coord_start, coord_end - 1):
             xa, ya = geoms[i, 1], geoms[i, 2]
             xb, yb = geoms[i + 1, 1], geoms[i + 1, 2]
 
@@ -155,6 +158,46 @@ def _rasterize_lines_engine(
                             raster_data[iy, ix] = 1
                         else:
                             raster_data[iy, ix] += clipped_length * weight
+
+
+@numba.jit(nopython=True)
+def _rasterize_lines_engine(
+    geoms: np.ndarray,
+    line_offsets: np.ndarray,
+    line_weights: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    dx: float,
+    dy: float,
+    half_dx: float,
+    half_dy: float,
+    x_grid_min: float,
+    x_grid_max: float,
+    y_grid_min: float,
+    y_grid_max: float,
+    mode_is_binary: bool,
+) -> np.ndarray:
+    """Rasterizes lines on a grid."""
+    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
+    _rasterize_lines_range_engine(
+        geoms,
+        line_offsets,
+        line_weights,
+        0,
+        len(line_weights),
+        x,
+        y,
+        dx,
+        dy,
+        half_dx,
+        half_dy,
+        x_grid_min,
+        x_grid_max,
+        y_grid_min,
+        y_grid_max,
+        mode_is_binary,
+        raster_data,
+    )
 
     return raster_data
 
@@ -706,7 +749,8 @@ def _rasterize_polygons_exact_engine(
 
 @numba.jit(nopython=True)
 def _rasterize_polygons_engine(
-    num_polygons: int,
+    start_polygon_idx: int,
+    end_polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
     interiors_coords: np.ndarray,
@@ -726,7 +770,53 @@ def _rasterize_polygons_engine(
 ) -> np.ndarray:
     """Rasterizes polygons on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-    for i in range(num_polygons):
+    _rasterize_polygons_range_engine(
+        start_polygon_idx,
+        end_polygon_idx,
+        exteriors_coords,
+        exteriors_offsets,
+        interiors_coords,
+        interiors_ring_offsets,
+        interiors_poly_offsets,
+        x,
+        y,
+        half_dx,
+        half_dy,
+        x_grid_min,
+        x_grid_max,
+        y_grid_min,
+        y_grid_max,
+        mode_is_binary,
+        weights,
+        large_polygon_threshold_cells,
+        raster_data,
+    )
+    return raster_data
+
+
+@numba.jit(nopython=True)
+def _rasterize_polygons_range_engine(
+    start_polygon_idx: int,
+    end_polygon_idx: int,
+    exteriors_coords: np.ndarray,
+    exteriors_offsets: np.ndarray,
+    interiors_coords: np.ndarray,
+    interiors_ring_offsets: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    x_grid_min: float,
+    x_grid_max: float,
+    y_grid_min: float,
+    y_grid_max: float,
+    mode_is_binary: bool,
+    weights: np.ndarray,
+    large_polygon_threshold_cells: int,
+    raster_data: np.ndarray,
+) -> None:
+    for i in range(start_polygon_idx, end_polygon_idx):
         weight = weights[i]
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
         exterior_coords = exteriors_coords[ext_start:ext_end]
@@ -792,4 +882,3 @@ def _rasterize_polygons_engine(
                 iy_end,
                 raster_data,
             )
-    return raster_data

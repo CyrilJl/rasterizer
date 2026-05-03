@@ -28,7 +28,8 @@ For example, you can rasterize polygons like this:
         y=y,
         crs=crs,
         mode='area',
-        weight='your_weight_column' # or None
+        weight='your_weight_column', # or None
+        progress_bar=False,
     )
     # `raster` is a properly georeferenced xarray.DataArray
 

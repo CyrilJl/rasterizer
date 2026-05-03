@@ -344,3 +344,80 @@ def test_rasterize_lines_weight_errors(grid):
 
     with pytest.raises(ValueError, match="Weight column 'non_numeric_weight' must be numeric."):
         rasterize_lines(gdf_lines, **grid, mode="length", weight="non_numeric_weight")
+
+
+class _FakeProgressBar:
+    def __init__(self, total, desc):
+        self.total = total
+        self.desc = desc
+        self.updated = 0
+
+    def update(self, n=1):
+        self.updated += n
+
+
+class _FakeProgressContext:
+    def __init__(self, bar):
+        self.bar = bar
+
+    def __enter__(self):
+        return self.bar
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_rasterize_lines_progress_bar_tracks_exploded_lines(grid, monkeypatch):
+    line_module = importlib.import_module("rasterizer.lines")
+    bars = []
+
+    def fake_progress(total, desc, enabled):
+        assert enabled is True
+        bar = _FakeProgressBar(total=total, desc=desc)
+        bars.append(bar)
+        return _FakeProgressContext(bar)
+
+    monkeypatch.setattr(line_module, "maybe_progress_bar", fake_progress)
+
+    gdf_lines = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(0, 0), (10, 10)]),
+            MultiLineString([[(10, 0), (10, 10)], [(20, 0), (20, 10)]]),
+        ],
+        crs=CRS,
+    )
+
+    rasterize_lines(gdf_lines, **grid, mode="length", progress_bar=True)
+
+    assert len(bars) == 1
+    assert bars[0].desc == "Rasterizing lines"
+    assert bars[0].total == 3
+    assert bars[0].updated == 3
+
+
+def test_rasterize_polygons_progress_bar_tracks_exploded_polygons(grid, monkeypatch):
+    polygon_module = importlib.import_module("rasterizer.polygons")
+    bars = []
+
+    def fake_progress(total, desc, enabled):
+        assert enabled is True
+        bar = _FakeProgressBar(total=total, desc=desc)
+        bars.append(bar)
+        return _FakeProgressContext(bar)
+
+    monkeypatch.setattr(polygon_module, "maybe_progress_bar", fake_progress)
+
+    gdf_polygons = gpd.GeoDataFrame(
+        geometry=[
+            box(0, 0, 10, 10),
+            MultiPolygon([box(20, 20, 30, 30), box(40, 40, 50, 50)]),
+        ],
+        crs=CRS,
+    )
+
+    rasterize_polygons(gdf_polygons, **grid, mode="area", progress_bar=True)
+
+    assert len(bars) == 1
+    assert bars[0].desc == "Rasterizing polygons"
+    assert bars[0].total == 3
+    assert bars[0].updated == 3

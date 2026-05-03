@@ -2,8 +2,10 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from ._misc import geocode
-from ._numba_engines import _rasterize_lines_engine
+from ._misc import geocode, maybe_progress_bar
+from ._numba_engines import _rasterize_lines_engine, _rasterize_lines_range_engine
+
+_PROGRESS_CHUNK_SIZE = 128
 
 
 def rasterize_lines(
@@ -13,6 +15,7 @@ def rasterize_lines(
     crs,
     mode: str = "length",
     weight: str = None,
+    progress_bar: bool = False,
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of LineString and MultiLineString on a regular,
@@ -33,6 +36,8 @@ def rasterize_lines(
             raster are the fraction of the length of the intersected line by
             each mesh multiplied by the value of the specified column.
             Defaults to None.
+        progress_bar (bool, optional): If True, display a ``tqdm`` progress bar
+            while processing exploded line geometries. Defaults to False.
 
 
     Returns:
@@ -101,22 +106,51 @@ def rasterize_lines(
         weights = np.ones(num_lines, dtype=np.float64)
 
     geoms_to_process = lines_proj.get_coordinates().reset_index().values.astype(np.float64)
+    line_boundaries = np.where(geoms_to_process[:-1, 0] != geoms_to_process[1:, 0])[0] + 1
+    line_offsets = np.concatenate(([0], line_boundaries, [geoms_to_process.shape[0]])).astype(np.intp)
 
-    raster_data_float = _rasterize_lines_engine(
-        geoms_to_process,
-        weights,
-        x,
-        y,
-        dx,
-        dy,
-        half_dx,
-        half_dy,
-        x_grid_min,
-        x_grid_max,
-        y_grid_min,
-        y_grid_max,
-        mode == "binary",
-    )
+    if not progress_bar:
+        raster_data_float = _rasterize_lines_engine(
+            geoms_to_process,
+            line_offsets,
+            weights,
+            x,
+            y,
+            dx,
+            dy,
+            half_dx,
+            half_dy,
+            x_grid_min,
+            x_grid_max,
+            y_grid_min,
+            y_grid_max,
+            mode == "binary",
+        )
+    else:
+        raster_data_float = np.zeros((len(y), len(x)), dtype=np.float64)
+        with maybe_progress_bar(num_lines, "Rasterizing lines", progress_bar) as progress:
+            for start_idx in range(0, num_lines, _PROGRESS_CHUNK_SIZE):
+                end_idx = min(start_idx + _PROGRESS_CHUNK_SIZE, num_lines)
+                _rasterize_lines_range_engine(
+                    geoms_to_process,
+                    line_offsets,
+                    weights,
+                    start_idx,
+                    end_idx,
+                    x,
+                    y,
+                    dx,
+                    dy,
+                    half_dx,
+                    half_dy,
+                    x_grid_min,
+                    x_grid_max,
+                    y_grid_min,
+                    y_grid_max,
+                    mode == "binary",
+                    raster_data_float,
+                )
+                progress.update(end_idx - start_idx)
 
     if mode == "binary":
         raster_data = raster_data_float.astype(bool)

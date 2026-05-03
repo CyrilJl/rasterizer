@@ -24,6 +24,7 @@ regular rectilinear grid, and ``crs`` anything parsable by ``pyproj``.
 
    raster_binary = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='binary')
    raster_length = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='length')
+   raster_length = rasterize_lines(lines=gdf, x=x, y=y, crs=crs, mode='length', progress_bar=True)
 
 .. list-table::
    :widths: 44 56
@@ -44,6 +45,7 @@ You can rasterize polygons in either binary or area mode on the same kind of reg
 
    raster_binary = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='binary')
    raster_area = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='area')
+   raster_area = rasterize_polygons(polygons=gdf, x=x, y=y, crs=crs, mode='area', progress_bar=True)
 
 .. list-table::
    :widths: 44 56

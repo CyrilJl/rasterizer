@@ -2,12 +2,13 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from ._misc import geocode
-from ._numba_engines import _rasterize_polygons_engine
+from ._misc import geocode, maybe_progress_bar
+from ._numba_engines import _rasterize_polygons_engine, _rasterize_polygons_range_engine
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
 # boundary cells than to clip every cell in the polygon bbox.
 _HYBRID_POLYGON_THRESHOLD_CELLS = 81
+_PROGRESS_CHUNK_SIZE = 128
 
 
 def compute_exterior(gdf_poly: gpd.GeoDataFrame) -> np.ndarray:
@@ -55,6 +56,7 @@ def rasterize_polygons(
     crs,
     mode: str = "area",
     weight: str = None,
+    progress_bar: bool = False,
 ) -> xr.DataArray:
     """
     Rasterizes a GeoDataFrame of Polygon and MultiPolygon on a regular,
@@ -75,6 +77,8 @@ def rasterize_polygons(
             raster are the fraction of the area of the intersected polygon by
             each mesh multiplied by the value of the specified column.
             Defaults to None.
+        progress_bar (bool, optional): If True, display a ``tqdm`` progress bar
+            while processing exploded polygon geometries. Defaults to False.
 
 
     Returns:
@@ -155,25 +159,54 @@ def rasterize_polygons(
         # for each polygon's run of interior rings.
         interiors_poly_offsets = np.searchsorted(int_ring_poly_idx, np.arange(num_polygons + 1), side="left")
 
-    raster_data_float = _rasterize_polygons_engine(
-        num_polygons,
-        exteriors_coords,
-        exteriors_offsets,
-        interiors_coords,
-        interiors_ring_offsets,
-        interiors_poly_offsets,
-        x,
-        y,
-        half_dx,
-        half_dy,
-        x_grid_min,
-        x_grid_max,
-        y_grid_min,
-        y_grid_max,
-        mode == "binary",
-        weights,
-        _HYBRID_POLYGON_THRESHOLD_CELLS,
-    )
+    if not progress_bar:
+        raster_data_float = _rasterize_polygons_engine(
+            0,
+            num_polygons,
+            exteriors_coords,
+            exteriors_offsets,
+            interiors_coords,
+            interiors_ring_offsets,
+            interiors_poly_offsets,
+            x,
+            y,
+            half_dx,
+            half_dy,
+            x_grid_min,
+            x_grid_max,
+            y_grid_min,
+            y_grid_max,
+            mode == "binary",
+            weights,
+            _HYBRID_POLYGON_THRESHOLD_CELLS,
+        )
+    else:
+        raster_data_float = np.zeros((len(y), len(x)), dtype=np.float64)
+        with maybe_progress_bar(num_polygons, "Rasterizing polygons", progress_bar) as progress:
+            for start_idx in range(0, num_polygons, _PROGRESS_CHUNK_SIZE):
+                end_idx = min(start_idx + _PROGRESS_CHUNK_SIZE, num_polygons)
+                _rasterize_polygons_range_engine(
+                    start_idx,
+                    end_idx,
+                    exteriors_coords,
+                    exteriors_offsets,
+                    interiors_coords,
+                    interiors_ring_offsets,
+                    interiors_poly_offsets,
+                    x,
+                    y,
+                    half_dx,
+                    half_dy,
+                    x_grid_min,
+                    x_grid_max,
+                    y_grid_min,
+                    y_grid_max,
+                    mode == "binary",
+                    weights,
+                    _HYBRID_POLYGON_THRESHOLD_CELLS,
+                    raster_data_float,
+                )
+                progress.update(end_idx - start_idx)
 
     if mode == "binary":
         raster_data = raster_data_float.astype(bool)

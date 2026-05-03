@@ -5,7 +5,7 @@ description = "A Python package to rasterize GeoDataFrames"
 authors = [{ name = "Cyril Joly" }]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["geopandas", "xarray", "numpy", "shapely", "rioxarray", "numba"]
+dependencies = ["geopandas", "xarray", "numpy", "shapely", "rioxarray", "numba", "tqdm"]
 
 [project.urls]
 Homepage = "https://github.com/CyrilJl/rasterizer"

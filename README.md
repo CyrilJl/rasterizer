@@ -25,6 +25,16 @@ from rasterizer import rasterize_polygons
 
 polys = gpd.read_file("polygons.gpkg")
 area_raster = rasterize_polygons(polys, your_x_grid, your_y_grid, polys.crs, mode="area")
+
+# Enable a tqdm progress bar when processing large geometry collections.
+area_raster = rasterize_polygons(
+    polys,
+    your_x_grid,
+    your_y_grid,
+    polys.crs,
+    mode="area",
+    progress_bar=True,
+)
 ```
 
 ### Rasterizing Lines
