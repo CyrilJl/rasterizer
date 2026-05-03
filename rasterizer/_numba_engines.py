@@ -1,10 +1,10 @@
 import math
 
-import numba
 import numpy as np
+from numba import njit
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _clip_line_cohen_sutherland_numba(
     xa: float,
     ya: float,
@@ -77,7 +77,7 @@ def _clip_line_cohen_sutherland_numba(
         return 0.0
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_lines_range_engine(
     geoms: np.ndarray,
     line_offsets: np.ndarray,
@@ -160,7 +160,7 @@ def _rasterize_lines_range_engine(
                             raster_data[iy, ix] += clipped_length * weight
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_lines_engine(
     geoms: np.ndarray,
     line_offsets: np.ndarray,
@@ -202,7 +202,7 @@ def _rasterize_lines_engine(
     return raster_data
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _polygon_area_numba(coords: np.ndarray) -> float:
     """Calculates the area of a polygon."""
     if len(coords) < 3:
@@ -215,7 +215,7 @@ def _polygon_area_numba(coords: np.ndarray) -> float:
     return abs(area) / 2.0
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _clip_polygon_area_to_box_numba(
     subject_coords: np.ndarray,
     xmin: float,
@@ -318,7 +318,7 @@ def _clip_polygon_area_to_box_numba(
     return abs(area) / 2.0
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _polygon_max_ring_vertices_numba(
     polygon_idx: int,
     exteriors_offsets: np.ndarray,
@@ -337,7 +337,7 @@ def _polygon_max_ring_vertices_numba(
     return max_vertices
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _clip_polygon_cell_area_numba(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
@@ -384,7 +384,7 @@ def _clip_polygon_cell_area_numba(
     return area
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _mark_boundary_cells_for_ring(
     ring_coords: np.ndarray,
     x: np.ndarray,
@@ -445,7 +445,7 @@ def _mark_boundary_cells_for_ring(
                     boundary_mask[local_iy, local_ix] = 1
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _append_scanline_intersections(
     ring_coords: np.ndarray, scan_y: float, intersections: np.ndarray, count: int
 ) -> int:
@@ -470,7 +470,7 @@ def _append_scanline_intersections(
     return count
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_polygon_bbox_exact(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
@@ -531,7 +531,7 @@ def _rasterize_polygon_bbox_exact(
                     raster_data[iy, ix] += area * weight
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_polygon_bbox_hybrid(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
@@ -679,7 +679,7 @@ def _rasterize_polygon_bbox_hybrid(
                     raster_data[iy, ix] += area * weight
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_polygons_exact_engine(
     num_polygons: int,
     exteriors_coords: np.ndarray,
@@ -747,7 +747,7 @@ def _rasterize_polygons_exact_engine(
     return raster_data
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_polygons_engine(
     start_polygon_idx: int,
     end_polygon_idx: int,
@@ -794,7 +794,7 @@ def _rasterize_polygons_engine(
     return raster_data
 
 
-@numba.jit(nopython=True)
+@njit(cache=True)
 def _rasterize_polygons_range_engine(
     start_polygon_idx: int,
     end_polygon_idx: int,
