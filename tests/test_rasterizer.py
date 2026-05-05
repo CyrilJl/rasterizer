@@ -1,5 +1,6 @@
 import importlib
 import random
+import time
 
 import geopandas as gpd
 import numpy as np
@@ -26,6 +27,9 @@ DX = 1.0
 DY = 1.0
 X = np.arange(X_RANGE[0] + DX / 2, X_RANGE[1], DX)
 Y = np.arange(Y_RANGE[0] + DY / 2, Y_RANGE[1], DY)
+TIMING_GRID_SIZE = 2000
+TIMING_POLYGON_COUNT = 300_000
+TIMING_REPEATS = 5
 
 
 @pytest.fixture
@@ -119,6 +123,45 @@ def generate_random_polygons(n_geometries, x_range, y_range, with_interiors_frac
             geometries.append(poly)
 
     return geometries
+
+
+def generate_timing_polygons(n_geometries, grid_size, rng):
+    """Generate a mix of rectangles, triangles, and concave polygons for the timing benchmark."""
+    widths = rng.uniform(1.0, 50.0, size=n_geometries)
+    heights = rng.uniform(1.0, 50.0, size=n_geometries)
+    half_widths = widths / 2.0
+    half_heights = heights / 2.0
+    centers_x = rng.uniform(half_widths, grid_size - half_widths)
+    centers_y = rng.uniform(half_heights, grid_size - half_heights)
+    shape_kinds = rng.integers(0, 3, size=n_geometries)
+
+    geometries = []
+    for kind, cx, cy, half_w, half_h in zip(shape_kinds, centers_x, centers_y, half_widths, half_heights):
+        if kind == 0:
+            geometries.append(box(cx - half_w, cy - half_h, cx + half_w, cy + half_h))
+        elif kind == 1:
+            geometries.append(
+                Polygon(
+                    [
+                        (cx, cy + half_h),
+                        (cx - half_w, cy - half_h),
+                        (cx + half_w, cy - half_h),
+                    ]
+                )
+            )
+        else:
+            geometries.append(
+                Polygon(
+                    [
+                        (cx - half_w, cy - half_h),
+                        (cx + half_w, cy - half_h),
+                        (cx + half_w, cy + half_h),
+                        (cx, cy + half_h / 3.0),
+                        (cx - half_w, cy + half_h),
+                    ]
+                )
+            )
+    return gpd.GeoSeries(geometries, crs=CRS)
 
 
 def test_rasterize_lines(grid, grid_gdf):
@@ -232,6 +275,22 @@ def test_rasterize_polygons_crsless_input_accepts_explicit_output_crs(grid):
         raster = rasterize_polygons(gdf_polygons, x=grid["x"], y=grid["y"], crs=CRS, mode="area")
 
     assert str(raster.rio.crs) == CRS
+
+
+def test_timing():
+    x = np.arange(0.5, TIMING_GRID_SIZE, 1.0, dtype=float)
+    y = np.arange(0.5, TIMING_GRID_SIZE, 1.0, dtype=float)
+    polygons = generate_timing_polygons(TIMING_POLYGON_COUNT, TIMING_GRID_SIZE, np.random.default_rng(0))
+
+    raster = None
+    for _ in range(TIMING_REPEATS):
+        start = time.perf_counter()
+        raster = rasterize_polygons(polygons, x=x, y=y, crs=CRS, mode="area")
+        elapsed = time.perf_counter() - start
+        print(f"{elapsed:.2f} s")
+
+    assert raster is not None
+    assert raster.shape == (len(y), len(x))
 
 
 def test_rasterize_polygons_with_weight(grid, grid_gdf):
