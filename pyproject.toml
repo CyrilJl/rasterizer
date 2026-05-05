@@ -21,9 +21,5 @@ build-backend = "setuptools.build_meta"
 [project.optional-dependencies]
 test = ["pytest", "scipy"]
 
-[tool.pytest.ini_options]
-markers = ["slow: long-running benchmark-style tests"]
-addopts = "-m 'not slow'"
-
 [tool.ruff]
 line-length = 120
