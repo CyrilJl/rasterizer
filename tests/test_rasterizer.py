@@ -213,6 +213,14 @@ def test_rasterize_lines_without_any_crs_is_supported(grid):
     assert raster.rio.crs is None
 
 
+def test_rasterize_lines_rejects_non_uniform_grid(grid):
+    gdf_lines = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 10)])], crs=CRS)
+    bad_x = np.array([0.5, 1.5, 3.0], dtype=float)
+
+    with pytest.raises(ValueError, match="x must be evenly spaced."):
+        rasterize_lines(gdf_lines, x=bad_x, y=grid["y"], mode="length")
+
+
 def test_rasterize_grid_aligned_lines_preserve_boundary_semantics(grid):
     gdf_lines = gpd.GeoDataFrame(
         geometry=[
@@ -286,6 +294,14 @@ def test_rasterize_polygons_without_any_crs_is_supported(grid):
 
     np.testing.assert_allclose(raster.values, expected.values)
     assert raster.rio.crs is None
+
+
+def test_rasterize_polygons_rejects_non_uniform_grid(grid):
+    gdf_polygons = gpd.GeoDataFrame(geometry=[box(0, 0, 10, 10)], crs=CRS)
+    bad_y = np.array([0.5, 1.5, 3.0], dtype=float)
+
+    with pytest.raises(ValueError, match="y must be evenly spaced."):
+        rasterize_polygons(gdf_polygons, x=grid["x"], y=bad_y, mode="area")
 
 
 def test_rasterize_polygons_crsless_input_accepts_explicit_output_crs(grid):

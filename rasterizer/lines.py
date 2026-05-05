@@ -4,7 +4,7 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from ._misc import geocode, maybe_progress_bar, prepare_vector_input
+from ._misc import geocode, maybe_progress_bar, prepare_vector_input, validate_regular_axis
 from ._numba_engines import _rasterize_lines_engine, _rasterize_lines_range_engine
 
 _PROGRESS_CHUNK_SIZE = 128
@@ -69,8 +69,8 @@ def rasterize_lines(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
-    dx = x[1] - x[0]
-    dy = y[1] - y[0]
+    dx = validate_regular_axis(x, "x")
+    dy = validate_regular_axis(y, "y")
     half_dx = dx / 2.0
     half_dy = dy / 2.0
 

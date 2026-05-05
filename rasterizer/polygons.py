@@ -4,7 +4,7 @@ import geopandas as gpd
 import numpy as np
 import xarray as xr
 
-from ._misc import geocode, geometry_series, maybe_progress_bar, prepare_vector_input
+from ._misc import geocode, geometry_series, maybe_progress_bar, prepare_vector_input, validate_regular_axis
 from ._numba_engines import _rasterize_polygons_engine, _rasterize_polygons_range_engine
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
@@ -105,8 +105,8 @@ def rasterize_polygons(
     if len(x) < 2 or len(y) < 2:
         return _empty_polygon_raster(x, y, crs, mode)
 
-    dx = x[1] - x[0]
-    dy = y[1] - y[0]
+    dx = validate_regular_axis(x, "x")
+    dy = validate_regular_axis(y, "y")
     half_dx = dx / 2.0
     half_dy = dy / 2.0
 

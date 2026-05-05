@@ -21,6 +21,26 @@ def geometry_series(data: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoSeries:
     return data.geometry if isinstance(data, gpd.GeoDataFrame) else data
 
 
+def validate_regular_axis(values: np.ndarray, name: str) -> float:
+    axis = np.asarray(values, dtype=np.float64)
+    if axis.ndim != 1:
+        raise ValueError(f"{name} must be one-dimensional.")
+    if len(axis) < 2:
+        raise ValueError(f"{name} must contain at least two values.")
+    if not np.all(np.isfinite(axis)):
+        raise ValueError(f"{name} must contain only finite values.")
+
+    diffs = np.diff(axis)
+    if not np.all(diffs > 0):
+        raise ValueError(f"{name} must be strictly increasing.")
+
+    step = diffs[0]
+    if not np.allclose(diffs, step, rtol=1e-10, atol=1e-12):
+        raise ValueError(f"{name} must be evenly spaced.")
+
+    return float(step)
+
+
 def prepare_vector_input(
     data: gpd.GeoDataFrame | gpd.GeoSeries,
     crs: Any,
