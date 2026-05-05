@@ -1,6 +1,6 @@
 # Rasterizer
 
-![PyPI - Version](https://img.shields.io/pypi/v/rasterizer)
+[![PyPI - Version](https://img.shields.io/pypi/v/rasterizer)](https://pypi.org/project/rasterizer/)
 [![Documentation Status](https://readthedocs.org/projects/rasterizer/badge/?version=latest)](https://rasterizer.readthedocs.io/en/latest/?badge=latest)
 [![Pytest](https://github.com/CyrilJl/rasterizer/actions/workflows/pytest.yml/badge.svg)](https://github.com/CyrilJl/rasterizer/actions/workflows/pytest.yml)
 
