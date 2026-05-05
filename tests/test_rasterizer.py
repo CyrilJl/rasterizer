@@ -213,6 +213,26 @@ def test_rasterize_lines_without_any_crs_is_supported(grid):
     assert raster.rio.crs is None
 
 
+def test_rasterize_grid_aligned_lines_preserve_boundary_semantics(grid):
+    gdf_lines = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(1, 0), (1, 3)]),
+            LineString([(0, 1), (3, 1)]),
+        ],
+        crs=CRS,
+    )
+
+    raster_len = rasterize_lines(gdf_lines, **grid, mode="length")
+    assert raster_len.values[0, 0] == 0.0
+    assert raster_len.values[0, 1] == 1.0
+    assert raster_len.values[1, 0] == 1.0
+
+    raster_bin = rasterize_lines(gdf_lines, **grid, mode="binary")
+    assert raster_bin.values[0, 0]
+    assert raster_bin.values[0, 1]
+    assert raster_bin.values[1, 0]
+
+
 def test_rasterize_lines_crsless_input_accepts_explicit_output_crs(grid):
     gdf_lines = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 10)])], crs=None)
 
@@ -395,6 +415,21 @@ def test_rasterize_large_polygon_hybrid_matches_exact(grid, monkeypatch):
     Force both polygon engines and check they produce identical values.
     """
     gdf_polygons = gpd.GeoDataFrame(geometry=[_make_donut_polygon()], crs=CRS)
+
+    _force_polygon_strategy(monkeypatch, "direct")
+    raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
+
+    _force_polygon_strategy(monkeypatch, "hybrid")
+    raster_hybrid = rasterize_polygons(gdf_polygons, **grid, mode="area")
+
+    np.testing.assert_allclose(raster_hybrid.values, raster_exact.values)
+
+
+def test_rasterize_grid_aligned_polygon_hybrid_matches_exact(grid, monkeypatch):
+    """
+    Grid-aligned boundaries need adjacent boundary cells marked before interior fill.
+    """
+    gdf_polygons = gpd.GeoDataFrame(geometry=[box(10, 10, 70, 70)], crs=CRS)
 
     _force_polygon_strategy(monkeypatch, "direct")
     raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
