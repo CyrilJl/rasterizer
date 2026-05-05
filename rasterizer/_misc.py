@@ -7,6 +7,8 @@ import numpy as np
 import rioxarray
 import xarray as xr
 
+from ._numba_engines import _validate_regular_axis_numba
+
 XRaster = TypeVar("XRaster", xr.DataArray, xr.Dataset)
 
 
@@ -30,12 +32,10 @@ def validate_regular_axis(values: np.ndarray, name: str) -> float:
     if not np.all(np.isfinite(axis)):
         raise ValueError(f"{name} must contain only finite values.")
 
-    diffs = np.diff(axis)
-    if not np.all(diffs > 0):
+    ok, reason, step = _validate_regular_axis_numba(np.ascontiguousarray(axis), 1e-10, 1e-12)
+    if not ok and reason == 1:
         raise ValueError(f"{name} must be strictly increasing.")
-
-    step = diffs[0]
-    if not np.allclose(diffs, step, rtol=1e-10, atol=1e-12):
+    if not ok:
         raise ValueError(f"{name} must be evenly spaced.")
 
     return float(step)

@@ -7,6 +7,22 @@ _GRID_EPS = 1e-12
 
 
 @njit(cache=True)
+def _validate_regular_axis_numba(axis: np.ndarray, rtol: float, atol: float) -> tuple[bool, int, float]:
+    step = axis[1] - axis[0]
+    if step <= 0.0:
+        return False, 1, 0.0
+
+    for i in range(len(axis) - 1):
+        diff = axis[i + 1] - axis[i]
+        if diff <= 0.0:
+            return False, 1, 0.0
+        if abs(diff - step) > atol + rtol * abs(step):
+            return False, 2, 0.0
+
+    return True, 0, step
+
+
+@njit(cache=True)
 def _bbox_indices_regular_grid(
     xmin: float,
     ymin: float,
