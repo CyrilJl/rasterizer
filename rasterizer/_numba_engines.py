@@ -3,7 +3,6 @@ import math
 import numpy as np
 from numba import njit
 
-
 _GRID_EPS = 1e-12
 
 
@@ -254,9 +253,7 @@ def _rasterize_line_segment_traversal(
     mode_is_binary: bool,
     raster_data: np.ndarray,
 ) -> None:
-    accepted, t_current, t_end = _clip_segment_to_grid_t(
-        xa, ya, xb, yb, x_grid_min, x_grid_max, y_grid_min, y_grid_max
-    )
+    accepted, t_current, t_end = _clip_segment_to_grid_t(xa, ya, xb, yb, x_grid_min, x_grid_max, y_grid_min, y_grid_max)
     if not accepted:
         return
 
@@ -317,9 +314,7 @@ def _mark_boundary_segment_traversal(
     ny: int,
     boundary_mask: np.ndarray,
 ) -> None:
-    accepted, t_current, t_end = _clip_segment_to_grid_t(
-        xa, ya, xb, yb, x_grid_min, x_grid_max, y_grid_min, y_grid_max
-    )
+    accepted, t_current, t_end = _clip_segment_to_grid_t(xa, ya, xb, yb, x_grid_min, x_grid_max, y_grid_min, y_grid_max)
     if not accepted:
         return
 
