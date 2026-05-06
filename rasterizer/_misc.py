@@ -32,12 +32,7 @@ def filter_to_bbox(
     ymax: float,
 ) -> gpd.GeoDataFrame | gpd.GeoSeries:
     bounds = shapely_bounds(geometry_series(data).array)
-    mask = (
-        (bounds[:, 0] <= xmax)
-        & (bounds[:, 2] >= xmin)
-        & (bounds[:, 1] <= ymax)
-        & (bounds[:, 3] >= ymin)
-    )
+    mask = (bounds[:, 0] <= xmax) & (bounds[:, 2] >= xmin) & (bounds[:, 1] <= ymax) & (bounds[:, 3] >= ymin)
     return cast(gpd.GeoDataFrame | gpd.GeoSeries, data.iloc[mask])
 
 
