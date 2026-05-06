@@ -49,4 +49,5 @@ cell centers with constant spacing, which define a regular rectilinear grid.
    usage
    large_dataset_showcase
    algorithm
+   changelog
    api

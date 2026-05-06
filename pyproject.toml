@@ -1,6 +1,6 @@
 [project]
 name = "rasterizer"
-version = "0.3.2"
+version = "0.3.3"
 description = "A Python package to rasterize GeoDataFrames"
 authors = [{ name = "Cyril Joly" }]
 readme = "README.md"

@@ -42,6 +42,7 @@ html_theme_options = {
         "Usage": "usage",
         "Large Dataset": "large_dataset_showcase",
         "Algorithm Notes": "algorithm",
+        "Changelog": "changelog",
         "API Reference": "api",
     },
     "extra_header_link_icons": {
