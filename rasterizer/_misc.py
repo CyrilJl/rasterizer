@@ -6,6 +6,7 @@ import geopandas as gpd
 import numpy as np
 import rioxarray
 import xarray as xr
+from shapely import bounds as shapely_bounds
 
 from ._numba_engines import _validate_regular_axis_numba
 
@@ -21,6 +22,23 @@ def geocode(ds: XRaster, x_name: str, y_name: str, crs: Any = None) -> XRaster:
 
 def geometry_series(data: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoSeries:
     return data.geometry if isinstance(data, gpd.GeoDataFrame) else data
+
+
+def filter_to_bbox(
+    data: gpd.GeoDataFrame | gpd.GeoSeries,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+) -> gpd.GeoDataFrame | gpd.GeoSeries:
+    bounds = shapely_bounds(geometry_series(data).array)
+    mask = (
+        (bounds[:, 0] <= xmax)
+        & (bounds[:, 2] >= xmin)
+        & (bounds[:, 1] <= ymax)
+        & (bounds[:, 3] >= ymin)
+    )
+    return cast(gpd.GeoDataFrame | gpd.GeoSeries, data.iloc[mask])
 
 
 def validate_regular_axis(values: np.ndarray, name: str) -> float:

@@ -3,8 +3,16 @@ from typing import cast
 import geopandas as gpd
 import numpy as np
 import xarray as xr
+from shapely import get_coordinates, get_num_geometries
 
-from ._misc import geocode, maybe_progress_bar, prepare_vector_input, validate_regular_axis
+from ._misc import (
+    filter_to_bbox,
+    geocode,
+    geometry_series,
+    maybe_progress_bar,
+    prepare_vector_input,
+    validate_regular_axis,
+)
 from ._numba_engines import _rasterize_lines_engine, _rasterize_lines_range_engine
 
 _PROGRESS_CHUNK_SIZE = 128
@@ -14,6 +22,19 @@ def _explode_lines(lines: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoDataFrame 
     if isinstance(lines, gpd.GeoDataFrame):
         return cast(gpd.GeoDataFrame, lines.explode(index_parts=False, ignore_index=True))
     return lines.explode(index_parts=False, ignore_index=True)
+
+
+def _line_coordinates_and_offsets(lines: gpd.GeoDataFrame | gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray]:
+    coords, geom_indexes = get_coordinates(geometry_series(lines).array, return_index=True)
+    coords = np.ascontiguousarray(coords, dtype=np.float64)
+    geom_indexes = np.asarray(geom_indexes, dtype=np.intp)
+
+    coord_counts = np.bincount(geom_indexes, minlength=len(lines))
+    line_offsets = np.empty(len(lines) + 1, dtype=np.intp)
+    line_offsets[0] = 0
+    np.cumsum(coord_counts, out=line_offsets[1:])
+
+    return coords, line_offsets
 
 
 def rasterize_lines(
@@ -77,9 +98,20 @@ def rasterize_lines(
     x_grid_min, x_grid_max = x[0] - half_dx, x[-1] + half_dx
     y_grid_min, y_grid_max = y[0] - half_dy, y[-1] + half_dy
 
-    lines_proj = lines_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
+    lines_proj = filter_to_bbox(lines_proj, x_grid_min, y_grid_min, x_grid_max, y_grid_max)
 
-    if mode != "binary":
+    line_weights = None
+    if weight is not None:
+        # Weighted mode preserves the existing normalization against the
+        # processed line length after geometric clipping.
+        lines_proj = lines_proj.clip([x_grid_min, y_grid_min, x_grid_max, y_grid_max])
+        lines_proj = lines_proj[lines_proj.length > 0]
+        lines_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, lines_proj)
+        line_lengths = geometry_series(lines_proj).length.to_numpy(dtype=np.float64)
+        line_values = cast(gpd.GeoDataFrame, lines_proj)[weight].to_numpy(dtype=np.float64)
+        explode_counts = np.asarray(get_num_geometries(geometry_series(lines_proj).array), dtype=np.intp)
+        line_weights = np.repeat(line_values / line_lengths, explode_counts)
+    elif mode != "binary":
         lines_proj = lines_proj[lines_proj.length > 0]
         lines_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, lines_proj)
 
@@ -91,27 +123,19 @@ def rasterize_lines(
         raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
         return geocode(raster, "x", "y", crs)
 
-    if weight is not None:
-        # This normalization is analogous to how rasterize_polygons handles
-        # area normalization. The weight is normalized by the total length of
-        # the original feature (LineString or MultiLineString).
-        lines_proj = cast(gpd.GeoDataFrame, lines_proj.assign(__line_length=lines_proj.length))
-
     lines_proj = _explode_lines(lines_proj)
     num_lines = len(lines_proj)
 
     if weight is not None:
-        weights = lines_proj[weight].values / lines_proj["__line_length"].values
+        weights = cast(np.ndarray, line_weights)
     else:
         weights = np.ones(num_lines, dtype=np.float64)
 
-    geoms_to_process = lines_proj.get_coordinates().reset_index().values.astype(np.float64)
-    line_boundaries = np.where(geoms_to_process[:-1, 0] != geoms_to_process[1:, 0])[0] + 1
-    line_offsets = np.concatenate(([0], line_boundaries, [geoms_to_process.shape[0]])).astype(np.intp)
+    coords, line_offsets = _line_coordinates_and_offsets(lines_proj)
 
     if not progress_bar:
         raster_data_float = _rasterize_lines_engine(
-            geoms_to_process,
+            coords,
             line_offsets,
             weights,
             x,
@@ -132,7 +156,7 @@ def rasterize_lines(
             for start_idx in range(0, num_lines, _PROGRESS_CHUNK_SIZE):
                 end_idx = min(start_idx + _PROGRESS_CHUNK_SIZE, num_lines)
                 _rasterize_lines_range_engine(
-                    geoms_to_process,
+                    coords,
                     line_offsets,
                     weights,
                     start_idx,

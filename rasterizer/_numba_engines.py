@@ -4,6 +4,7 @@ import numpy as np
 from numba import njit
 
 _GRID_EPS = 1e-12
+_INF_T = 1e300
 
 
 @njit(cache=True)
@@ -133,65 +134,31 @@ def _clip_segment_to_grid_t(
 
 
 @njit(cache=True)
-def _next_vertical_crossing_t(
-    x_pos: float,
-    xa: float,
-    vx: float,
-    x_grid_min: float,
-    x_grid_max: float,
-    dx: float,
+def _initial_incremental_crossing_t(
+    pos: float,
+    segment_start: float,
+    velocity: float,
+    grid_min: float,
+    d: float,
+    inv_d: float,
     t_current: float,
-    t_end: float,
-) -> float:
-    if vx == 0.0:
-        return t_end
+) -> tuple[float, float]:
+    if velocity == 0.0:
+        return _INF_T, _INF_T
 
-    if vx > 0.0:
-        line_idx = math.floor((x_pos - x_grid_min) / dx) + 1
-        while line_idx * dx + x_grid_min <= x_grid_max:
-            t = (x_grid_min + line_idx * dx - xa) / vx
-            if t > t_current + _GRID_EPS:
-                return min(t, t_end)
-            line_idx += 1
+    if velocity > 0.0:
+        line_idx = math.floor((pos - grid_min) * inv_d) + 1
+        t_next = (grid_min + line_idx * d - segment_start) / velocity
+        t_delta = d / velocity
     else:
-        line_idx = math.ceil((x_pos - x_grid_min) / dx) - 1
-        while line_idx * dx + x_grid_min >= x_grid_min:
-            t = (x_grid_min + line_idx * dx - xa) / vx
-            if t > t_current + _GRID_EPS:
-                return min(t, t_end)
-            line_idx -= 1
-    return t_end
+        line_idx = math.ceil((pos - grid_min) * inv_d) - 1
+        t_next = (grid_min + line_idx * d - segment_start) / velocity
+        t_delta = -d / velocity
 
+    while t_next <= t_current + _GRID_EPS:
+        t_next += t_delta
 
-@njit(cache=True)
-def _next_horizontal_crossing_t(
-    y_pos: float,
-    ya: float,
-    vy: float,
-    y_grid_min: float,
-    y_grid_max: float,
-    dy: float,
-    t_current: float,
-    t_end: float,
-) -> float:
-    if vy == 0.0:
-        return t_end
-
-    if vy > 0.0:
-        line_idx = math.floor((y_pos - y_grid_min) / dy) + 1
-        while line_idx * dy + y_grid_min <= y_grid_max:
-            t = (y_grid_min + line_idx * dy - ya) / vy
-            if t > t_current + _GRID_EPS:
-                return min(t, t_end)
-            line_idx += 1
-    else:
-        line_idx = math.ceil((y_pos - y_grid_min) / dy) - 1
-        while line_idx * dy + y_grid_min >= y_grid_min:
-            t = (y_grid_min + line_idx * dy - ya) / vy
-            if t > t_current + _GRID_EPS:
-                return min(t, t_end)
-            line_idx -= 1
-    return t_end
+    return t_next, t_delta
 
 
 @njit(cache=True)
@@ -286,12 +253,17 @@ def _rasterize_line_segment_traversal(
     duplicate_left = vx == 0.0 and _is_on_grid_line(xa, x_grid_min, inv_dx, nx)
     duplicate_down = vy == 0.0 and _is_on_grid_line(ya, y_grid_min, inv_dy, ny)
 
+    x_current = xa + vx * t_current
+    y_current = ya + vy * t_current
+    t_next_x, t_delta_x = _initial_incremental_crossing_t(x_current, xa, vx, x_grid_min, dx, inv_dx, t_current)
+    t_next_y, t_delta_y = _initial_incremental_crossing_t(y_current, ya, vy, y_grid_min, dy, inv_dy, t_current)
+
     while t_current < t_end - _GRID_EPS:
-        x_current = xa + vx * t_current
-        y_current = ya + vy * t_current
-        tx = _next_vertical_crossing_t(x_current, xa, vx, x_grid_min, x_grid_max, dx, t_current, t_end)
-        ty = _next_horizontal_crossing_t(y_current, ya, vy, y_grid_min, y_grid_max, dy, t_current, t_end)
-        t_next = min(tx, ty, t_end)
+        t_next = t_next_x
+        if t_next_y < t_next:
+            t_next = t_next_y
+        if t_end < t_next:
+            t_next = t_end
 
         if t_next <= t_current:
             break
@@ -308,6 +280,10 @@ def _rasterize_line_segment_traversal(
             raster_data[iy, ix] += segment_length * (t_next - t_current) * weight
 
         t_current = t_next
+        if t_next_x <= t_current + _GRID_EPS:
+            t_next_x += t_delta_x
+        if t_next_y <= t_current + _GRID_EPS:
+            t_next_y += t_delta_y
 
 
 @njit(cache=True)
@@ -344,12 +320,17 @@ def _mark_boundary_segment_traversal(
     duplicate_left = vx == 0.0 and _is_on_grid_line(xa, x_grid_min, inv_dx, nx)
     duplicate_down = vy == 0.0 and _is_on_grid_line(ya, y_grid_min, inv_dy, ny)
 
+    x_current = xa + vx * t_current
+    y_current = ya + vy * t_current
+    t_next_x, t_delta_x = _initial_incremental_crossing_t(x_current, xa, vx, x_grid_min, dx, inv_dx, t_current)
+    t_next_y, t_delta_y = _initial_incremental_crossing_t(y_current, ya, vy, y_grid_min, dy, inv_dy, t_current)
+
     while t_current < t_end - _GRID_EPS:
-        x_current = xa + vx * t_current
-        y_current = ya + vy * t_current
-        tx = _next_vertical_crossing_t(x_current, xa, vx, x_grid_min, x_grid_max, dx, t_current, t_end)
-        ty = _next_horizontal_crossing_t(y_current, ya, vy, y_grid_min, y_grid_max, dy, t_current, t_end)
-        t_next = min(tx, ty, t_end)
+        t_next = t_next_x
+        if t_next_y < t_next:
+            t_next = t_next_y
+        if t_end < t_next:
+            t_next = t_end
 
         if t_next <= t_current:
             break
@@ -373,11 +354,15 @@ def _mark_boundary_segment_traversal(
         )
 
         t_current = t_next
+        if t_next_x <= t_current + _GRID_EPS:
+            t_next_x += t_delta_x
+        if t_next_y <= t_current + _GRID_EPS:
+            t_next_y += t_delta_y
 
 
 @njit(cache=True)
 def _rasterize_lines_range_engine(
-    geoms: np.ndarray,
+    coords: np.ndarray,
     line_offsets: np.ndarray,
     line_weights: np.ndarray,
     start_line_idx: int,
@@ -401,8 +386,8 @@ def _rasterize_lines_range_engine(
         coord_end = line_offsets[line_idx + 1]
 
         for i in range(coord_start, coord_end - 1):
-            xa, ya = geoms[i, 1], geoms[i, 2]
-            xb, yb = geoms[i + 1, 1], geoms[i + 1, 2]
+            xa, ya = coords[i, 0], coords[i, 1]
+            xb, yb = coords[i + 1, 0], coords[i + 1, 1]
 
             seg_xmin, seg_xmax = min(xa, xb), max(xa, xb)
             seg_ymin, seg_ymax = min(ya, yb), max(ya, yb)
@@ -429,7 +414,7 @@ def _rasterize_lines_range_engine(
 
 @njit(cache=True)
 def _rasterize_lines_engine(
-    geoms: np.ndarray,
+    coords: np.ndarray,
     line_offsets: np.ndarray,
     line_weights: np.ndarray,
     x: np.ndarray,
@@ -447,7 +432,7 @@ def _rasterize_lines_engine(
     """Rasterizes lines on a grid."""
     raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
     _rasterize_lines_range_engine(
-        geoms,
+        coords,
         line_offsets,
         line_weights,
         0,
@@ -586,22 +571,25 @@ def _clip_polygon_area_to_box_numba(
 
 
 @njit(cache=True)
-def _polygon_max_ring_vertices_numba(
+def _polygon_ring_vertex_counts_numba(
     polygon_idx: int,
     exteriors_offsets: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
-) -> int:
-    max_vertices = exteriors_offsets[polygon_idx + 1] - exteriors_offsets[polygon_idx]
+) -> tuple[int, int]:
+    exterior_vertices = exteriors_offsets[polygon_idx + 1] - exteriors_offsets[polygon_idx]
+    max_vertices = exterior_vertices
+    total_vertices = exterior_vertices
     poly_int_start = interiors_poly_offsets[polygon_idx]
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
 
     for j in range(poly_int_start, poly_int_end):
         ring_vertices = interiors_ring_offsets[j + 1] - interiors_ring_offsets[j]
+        total_vertices += ring_vertices
         if ring_vertices > max_vertices:
             max_vertices = ring_vertices
 
-    return max_vertices
+    return max_vertices, total_vertices
 
 
 @njit(cache=True)
@@ -768,17 +756,9 @@ def _rasterize_polygon_bbox_exact(
     iy_start: int,
     iy_end: int,
     raster_data: np.ndarray,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
 ) -> None:
-    max_ring_vertices = _polygon_max_ring_vertices_numba(
-        polygon_idx,
-        exteriors_offsets,
-        interiors_ring_offsets,
-        interiors_poly_offsets,
-    )
-    scratch_capacity = max_ring_vertices + 8
-    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
-    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
-
     for iy in range(iy_start, iy_end):
         cell_ymin = y[iy] - half_dy
         cell_ymax = y[iy] + half_dy
@@ -829,6 +809,9 @@ def _rasterize_polygon_bbox_hybrid(
     iy_start: int,
     iy_end: int,
     raster_data: np.ndarray,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
+    intersections: np.ndarray,
 ) -> None:
     bbox_width = ix_end - ix_start
     bbox_height = iy_end - iy_start
@@ -838,15 +821,6 @@ def _rasterize_polygon_bbox_hybrid(
 
     ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
     exterior_coords = exteriors_coords[ext_start:ext_end]
-    max_ring_vertices = _polygon_max_ring_vertices_numba(
-        polygon_idx,
-        exteriors_offsets,
-        interiors_ring_offsets,
-        interiors_poly_offsets,
-    )
-    scratch_capacity = max_ring_vertices + 8
-    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
-    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
 
     _mark_boundary_cells_for_ring(
         exterior_coords,
@@ -863,13 +837,11 @@ def _rasterize_polygon_bbox_hybrid(
 
     poly_int_start = interiors_poly_offsets[polygon_idx]
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
-    total_ring_vertices = len(exterior_coords)
 
     for j in range(poly_int_start, poly_int_end):
         int_start = interiors_ring_offsets[j]
         int_end = interiors_ring_offsets[j + 1]
         interior_coords = interiors_coords[int_start:int_end]
-        total_ring_vertices += len(interior_coords)
         _mark_boundary_cells_for_ring(
             interior_coords,
             x,
@@ -887,7 +859,6 @@ def _rasterize_polygon_bbox_hybrid(
     if not mode_is_binary:
         full_cell_value = 4.0 * half_dx * half_dy * weight
 
-    intersections = np.empty(total_ring_vertices, dtype=np.float64)
     x0 = x[0]
     inv_dx = 1.0 / (2.0 * half_dx)
     for iy in range(iy_start, iy_end):
@@ -983,6 +954,21 @@ def _rasterize_polygons_exact_engine(
     inv_dy = 1.0 / (2.0 * half_dy)
     nx = len(x)
     ny = len(y)
+    max_ring_vertices = 1
+    for i in range(num_polygons):
+        ring_vertices, _total_vertices = _polygon_ring_vertex_counts_numba(
+            i,
+            exteriors_offsets,
+            interiors_ring_offsets,
+            interiors_poly_offsets,
+        )
+        if ring_vertices > max_ring_vertices:
+            max_ring_vertices = ring_vertices
+
+    scratch_capacity = max_ring_vertices + 8
+    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
+    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
+
     for i in range(num_polygons):
         weight = weights[i]
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
@@ -1024,6 +1010,8 @@ def _rasterize_polygons_exact_engine(
             iy_start,
             iy_end,
             raster_data,
+            scratch_a,
+            scratch_b,
         )
 
     return raster_data
@@ -1104,6 +1092,25 @@ def _rasterize_polygons_range_engine(
     inv_dy = 1.0 / (2.0 * half_dy)
     nx = len(x)
     ny = len(y)
+    max_ring_vertices = 1
+    max_total_ring_vertices = 1
+    for i in range(start_polygon_idx, end_polygon_idx):
+        ring_vertices, total_vertices = _polygon_ring_vertex_counts_numba(
+            i,
+            exteriors_offsets,
+            interiors_ring_offsets,
+            interiors_poly_offsets,
+        )
+        if ring_vertices > max_ring_vertices:
+            max_ring_vertices = ring_vertices
+        if total_vertices > max_total_ring_vertices:
+            max_total_ring_vertices = total_vertices
+
+    scratch_capacity = max_ring_vertices + 8
+    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
+    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
+    intersections = np.empty(max_total_ring_vertices, dtype=np.float64)
+
     for i in range(start_polygon_idx, end_polygon_idx):
         weight = weights[i]
         ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
@@ -1147,6 +1154,8 @@ def _rasterize_polygons_range_engine(
                 iy_start,
                 iy_end,
                 raster_data,
+                scratch_a,
+                scratch_b,
             )
         else:
             _rasterize_polygon_bbox_hybrid(
@@ -1167,4 +1176,7 @@ def _rasterize_polygons_range_engine(
                 iy_start,
                 iy_end,
                 raster_data,
+                scratch_a,
+                scratch_b,
+                intersections,
             )
