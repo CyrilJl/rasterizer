@@ -33,6 +33,8 @@ def filter_to_bbox(
 ) -> gpd.GeoDataFrame | gpd.GeoSeries:
     bounds = shapely_bounds(geometry_series(data).array)
     mask = (bounds[:, 0] <= xmax) & (bounds[:, 2] >= xmin) & (bounds[:, 1] <= ymax) & (bounds[:, 3] >= ymin)
+    if np.all(mask):
+        return data
     return cast(gpd.GeoDataFrame | gpd.GeoSeries, data.iloc[mask])
 
 
@@ -71,12 +73,9 @@ def prepare_vector_input(
         if not np.issubdtype(np.asarray(data[weight]).dtype, np.number):
             raise ValueError(f"Weight column '{weight}' must be numeric.")
 
-    geom = geometry_series(data).force_2d()
-    if isinstance(data, gpd.GeoDataFrame):
-        data = cast(gpd.GeoDataFrame, data.set_geometry(geom))
-    else:
-        data = geom
-    data = data[geometry_series(data).geom_type.isin(allowed_geom_types)]
+    geom_type_mask = geometry_series(data).geom_type.isin(allowed_geom_types)
+    if not geom_type_mask.all():
+        data = data[geom_type_mask]
 
     resolved_crs = data.crs if crs is None else crs
     if crs is None or data.crs == crs:

@@ -3,7 +3,14 @@ from typing import cast
 import geopandas as gpd
 import numpy as np
 import xarray as xr
-from shapely import get_coordinates, get_exterior_ring, get_interior_ring, get_num_interior_rings
+from shapely import (
+    get_coordinates,
+    get_exterior_ring,
+    get_interior_ring,
+    get_num_geometries,
+    get_num_interior_rings,
+    get_parts,
+)
 
 from ._misc import (
     filter_to_bbox,
@@ -17,7 +24,7 @@ from ._numba_engines import _rasterize_polygons_engine, _rasterize_polygons_rang
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
 # boundary cells than to clip every cell in the polygon bbox.
-_HYBRID_POLYGON_THRESHOLD_CELLS = 81
+_HYBRID_POLYGON_THRESHOLD_CELLS = 36
 _PROGRESS_CHUNK_SIZE = 128
 
 
@@ -25,6 +32,12 @@ def _explode_polygons(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoData
     if isinstance(polygons, gpd.GeoDataFrame):
         return cast(gpd.GeoDataFrame, polygons.explode(index_parts=False, ignore_index=True))
     return polygons.explode(index_parts=False, ignore_index=True)
+
+
+def _geometry_array(polygons):
+    if isinstance(polygons, (gpd.GeoDataFrame, gpd.GeoSeries)):
+        return geometry_series(polygons).array
+    return polygons
 
 
 def compute_exterior(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
@@ -57,46 +70,98 @@ def compute_interiors(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
 
 
 def _polygon_exterior_coordinates_and_offsets(
-    polygons: gpd.GeoDataFrame | gpd.GeoSeries,
+    polygons,
 ) -> tuple[np.ndarray, np.ndarray]:
-    rings = get_exterior_ring(geometry_series(polygons).array)
+    geoms = _geometry_array(polygons)
+    rings = get_exterior_ring(geoms)
     coords, ring_indexes = get_coordinates(rings, return_index=True)
     coords = np.ascontiguousarray(coords, dtype=np.float64)
     ring_indexes = np.asarray(ring_indexes, dtype=np.intp)
 
-    coord_counts = np.bincount(ring_indexes, minlength=len(polygons))
-    offsets = np.empty(len(polygons) + 1, dtype=np.intp)
+    coord_counts = np.bincount(ring_indexes, minlength=len(geoms))
+    offsets = np.empty(len(geoms) + 1, dtype=np.intp)
     offsets[0] = 0
     np.cumsum(coord_counts, out=offsets[1:])
     return coords, offsets
 
 
+def _polygon_all_coordinates_offsets_and_exterior_lengths(
+    polygons,
+    interior_coord_counts: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    geoms = _geometry_array(polygons)
+    coords, geom_indexes = get_coordinates(geoms, return_index=True)
+    coords = np.ascontiguousarray(coords, dtype=np.float64)
+    geom_indexes = np.asarray(geom_indexes, dtype=np.intp)
+
+    coord_counts = np.bincount(geom_indexes, minlength=len(geoms))
+    offsets = np.empty(len(geoms) + 1, dtype=np.intp)
+    offsets[0] = 0
+    np.cumsum(coord_counts, out=offsets[1:])
+
+    exterior_lengths = coord_counts - interior_coord_counts
+    return coords, offsets, np.asarray(exterior_lengths, dtype=np.intp)
+
+
 def _repeated_ring_indexes(ring_counts: np.ndarray) -> np.ndarray:
     total_rings = int(ring_counts.sum())
-    ring_indexes = np.empty(total_rings, dtype=np.intp)
-    offset = 0
-    for count in ring_counts:
-        end = offset + int(count)
-        ring_indexes[offset:end] = np.arange(count, dtype=np.intp)
-        offset = end
-    return ring_indexes
+    if total_rings == 0:
+        return np.empty(0, dtype=np.intp)
+
+    ring_offsets = np.empty(len(ring_counts), dtype=np.intp)
+    ring_offsets[0] = 0
+    np.cumsum(ring_counts[:-1], out=ring_offsets[1:])
+    return np.arange(total_rings, dtype=np.intp) - np.repeat(ring_offsets, ring_counts)
+
+
+def _polygon_parts_and_indexes(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray]:
+    geoms = geometry_series(polygons).array
+    part_counts = np.asarray(get_num_geometries(geoms), dtype=np.intp)
+    if np.all(part_counts == 1):
+        return geoms, np.arange(len(geoms), dtype=np.intp)
+
+    part_offsets = np.empty(len(geoms) + 1, dtype=np.intp)
+    part_offsets[0] = 0
+    np.cumsum(part_counts, out=part_offsets[1:])
+
+    total_parts = int(part_offsets[-1])
+    part_indexes = np.repeat(np.arange(len(geoms), dtype=np.intp), part_counts)
+    parts = np.empty(total_parts, dtype=object)
+
+    geom_objects = np.asarray(geoms, dtype=object)
+    single_mask = part_counts == 1
+    parts[part_offsets[:-1][single_mask]] = geom_objects[single_mask]
+
+    for geom_idx in np.flatnonzero(~single_mask):
+        start = part_offsets[geom_idx]
+        end = part_offsets[geom_idx + 1]
+        if start < end:
+            parts[start:end] = get_parts(geom_objects[geom_idx])
+
+    return parts, part_indexes
 
 
 def _polygon_interior_coordinates_and_offsets(
-    polygons: gpd.GeoDataFrame | gpd.GeoSeries,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    geoms = geometry_series(polygons).array
+    polygons,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    geoms = _geometry_array(polygons)
     ring_counts = np.asarray(get_num_interior_rings(geoms), dtype=np.intp)
     total_rings = int(ring_counts.sum())
+    interior_coord_counts = np.zeros(len(geoms), dtype=np.intp)
 
-    interiors_poly_offsets = np.empty(len(polygons) + 1, dtype=np.intp)
+    interiors_poly_offsets = np.empty(len(geoms) + 1, dtype=np.intp)
     interiors_poly_offsets[0] = 0
     np.cumsum(ring_counts, out=interiors_poly_offsets[1:])
 
     if total_rings == 0:
-        return np.empty((0, 2), dtype=np.float64), np.array([0], dtype=np.intp), interiors_poly_offsets
+        return (
+            np.empty((0, 2), dtype=np.float64),
+            np.array([0], dtype=np.intp),
+            interiors_poly_offsets,
+            interior_coord_counts,
+        )
 
-    polygon_indexes = np.repeat(np.arange(len(polygons), dtype=np.intp), ring_counts)
+    polygon_indexes = np.repeat(np.arange(len(geoms), dtype=np.intp), ring_counts)
     ring_indexes = _repeated_ring_indexes(ring_counts)
     rings = get_interior_ring(geoms.take(polygon_indexes), ring_indexes)
     coords, coord_ring_indexes = get_coordinates(rings, return_index=True)
@@ -108,7 +173,10 @@ def _polygon_interior_coordinates_and_offsets(
     interiors_ring_offsets[0] = 0
     np.cumsum(coord_counts, out=interiors_ring_offsets[1:])
 
-    return coords, interiors_ring_offsets, interiors_poly_offsets
+    for ring_idx in range(total_rings):
+        interior_coord_counts[polygon_indexes[ring_idx]] += coord_counts[ring_idx]
+
+    return coords, interiors_ring_offsets, interiors_poly_offsets, interior_coord_counts
 
 
 def _empty_polygon_raster(x: np.ndarray, y: np.ndarray, crs, mode: str) -> xr.DataArray:
@@ -178,33 +246,42 @@ def rasterize_polygons(
 
     polygons_proj = filter_to_bbox(polygons_proj, x_grid_min, y_grid_min, x_grid_max, y_grid_max)
 
+    polygon_areas = None
     if mode != "binary":
-        polygons_proj = polygons_proj[polygons_proj.area > 0]
-        polygons_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, polygons_proj)
+        polygon_areas = geometry_series(polygons_proj).area.to_numpy(dtype=np.float64)
+        valid_area = polygon_areas > 0.0
+        if not np.all(valid_area):
+            polygons_proj = polygons_proj.iloc[valid_area]
+            polygon_areas = polygon_areas[valid_area]
+            polygons_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, polygons_proj)
 
     if polygons_proj.empty:
         return _empty_polygon_raster(x, y, crs, mode)
 
-    if weight is not None:
-        polygons_proj = cast(gpd.GeoDataFrame, polygons_proj.assign(__polygon_area=polygons_proj.area))
-
-    polygons_proj = _explode_polygons(polygons_proj)
-    num_polygons = len(polygons_proj)
+    part_geometries, part_indexes = _polygon_parts_and_indexes(polygons_proj)
+    num_polygons = len(part_geometries)
 
     if weight is not None:
-        weights = polygons_proj[weight].values / polygons_proj["__polygon_area"].values
+        if polygon_areas is None:
+            raise RuntimeError("Internal error: weighted polygon rasterization requires polygon areas.")
+        source_weights = cast(gpd.GeoDataFrame, polygons_proj)[weight].to_numpy(dtype=np.float64) / polygon_areas
+        weights = source_weights[part_indexes]
     else:
         weights = np.ones(num_polygons, dtype=np.float64)
 
     if num_polygons == 0:
         return _empty_polygon_raster(x, y, crs, mode)
 
-    exteriors_coords, exteriors_offsets = _polygon_exterior_coordinates_and_offsets(polygons_proj)
     (
         interiors_coords,
         interiors_ring_offsets,
         interiors_poly_offsets,
-    ) = _polygon_interior_coordinates_and_offsets(polygons_proj)
+        interior_coord_counts,
+    ) = _polygon_interior_coordinates_and_offsets(part_geometries)
+    exteriors_coords, exteriors_offsets, exterior_lengths = _polygon_all_coordinates_offsets_and_exterior_lengths(
+        part_geometries,
+        interior_coord_counts,
+    )
 
     if not progress_bar:
         raster_data_float = _rasterize_polygons_engine(
@@ -212,6 +289,7 @@ def rasterize_polygons(
             num_polygons,
             exteriors_coords,
             exteriors_offsets,
+            exterior_lengths,
             interiors_coords,
             interiors_ring_offsets,
             interiors_poly_offsets,
@@ -237,6 +315,7 @@ def rasterize_polygons(
                     end_idx,
                     exteriors_coords,
                     exteriors_offsets,
+                    exterior_lengths,
                     interiors_coords,
                     interiors_ring_offsets,
                     interiors_poly_offsets,
