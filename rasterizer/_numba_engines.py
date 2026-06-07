@@ -574,10 +574,11 @@ def _clip_polygon_area_to_box_numba(
 def _polygon_ring_vertex_counts_numba(
     polygon_idx: int,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
 ) -> tuple[int, int]:
-    exterior_vertices = exteriors_offsets[polygon_idx + 1] - exteriors_offsets[polygon_idx]
+    exterior_vertices = exterior_lengths[polygon_idx]
     max_vertices = exterior_vertices
     total_vertices = exterior_vertices
     poly_int_start = interiors_poly_offsets[polygon_idx]
@@ -597,6 +598,7 @@ def _clip_polygon_cell_area_numba(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -607,7 +609,8 @@ def _clip_polygon_cell_area_numba(
     scratch_a: np.ndarray,
     scratch_b: np.ndarray,
 ) -> float:
-    ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
+    ext_start = exteriors_offsets[polygon_idx]
+    ext_end = ext_start + exterior_lengths[polygon_idx]
     exterior_coords = exteriors_coords[ext_start:ext_end]
     area = _clip_polygon_area_to_box_numba(
         exterior_coords,
@@ -742,6 +745,7 @@ def _rasterize_polygon_bbox_exact(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -772,6 +776,7 @@ def _rasterize_polygon_bbox_exact(
                 polygon_idx,
                 exteriors_coords,
                 exteriors_offsets,
+                exterior_lengths,
                 interiors_coords,
                 interiors_ring_offsets,
                 interiors_poly_offsets,
@@ -795,6 +800,7 @@ def _rasterize_polygon_bbox_hybrid(
     polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -819,7 +825,8 @@ def _rasterize_polygon_bbox_hybrid(
     # cells by scanline spans because the polygon boundary does not cross them.
     boundary_mask = np.zeros((bbox_height, bbox_width), dtype=np.uint8)
 
-    ext_start, ext_end = exteriors_offsets[polygon_idx], exteriors_offsets[polygon_idx + 1]
+    ext_start = exteriors_offsets[polygon_idx]
+    ext_end = ext_start + exterior_lengths[polygon_idx]
     exterior_coords = exteriors_coords[ext_start:ext_end]
 
     _mark_boundary_cells_for_ring(
@@ -910,6 +917,7 @@ def _rasterize_polygon_bbox_hybrid(
                 polygon_idx,
                 exteriors_coords,
                 exteriors_offsets,
+                exterior_lengths,
                 interiors_coords,
                 interiors_ring_offsets,
                 interiors_poly_offsets,
@@ -933,6 +941,7 @@ def _rasterize_polygons_exact_engine(
     num_polygons: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -959,6 +968,7 @@ def _rasterize_polygons_exact_engine(
         ring_vertices, _total_vertices = _polygon_ring_vertex_counts_numba(
             i,
             exteriors_offsets,
+            exterior_lengths,
             interiors_ring_offsets,
             interiors_poly_offsets,
         )
@@ -971,7 +981,8 @@ def _rasterize_polygons_exact_engine(
 
     for i in range(num_polygons):
         weight = weights[i]
-        ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
+        ext_start = exteriors_offsets[i]
+        ext_end = ext_start + exterior_lengths[i]
         poly_xmin, poly_ymin, poly_xmax, poly_ymax = _ring_bounds_numba(exteriors_coords, ext_start, ext_end)
 
         if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
@@ -996,6 +1007,7 @@ def _rasterize_polygons_exact_engine(
             i,
             exteriors_coords,
             exteriors_offsets,
+            exterior_lengths,
             interiors_coords,
             interiors_ring_offsets,
             interiors_poly_offsets,
@@ -1023,6 +1035,7 @@ def _rasterize_polygons_engine(
     end_polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -1045,6 +1058,7 @@ def _rasterize_polygons_engine(
         end_polygon_idx,
         exteriors_coords,
         exteriors_offsets,
+        exterior_lengths,
         interiors_coords,
         interiors_ring_offsets,
         interiors_poly_offsets,
@@ -1070,6 +1084,7 @@ def _rasterize_polygons_range_engine(
     end_polygon_idx: int,
     exteriors_coords: np.ndarray,
     exteriors_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
     interiors_coords: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -1098,6 +1113,7 @@ def _rasterize_polygons_range_engine(
         ring_vertices, total_vertices = _polygon_ring_vertex_counts_numba(
             i,
             exteriors_offsets,
+            exterior_lengths,
             interiors_ring_offsets,
             interiors_poly_offsets,
         )
@@ -1113,7 +1129,8 @@ def _rasterize_polygons_range_engine(
 
     for i in range(start_polygon_idx, end_polygon_idx):
         weight = weights[i]
-        ext_start, ext_end = exteriors_offsets[i], exteriors_offsets[i + 1]
+        ext_start = exteriors_offsets[i]
+        ext_end = ext_start + exterior_lengths[i]
         poly_xmin, poly_ymin, poly_xmax, poly_ymax = _ring_bounds_numba(exteriors_coords, ext_start, ext_end)
 
         if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
@@ -1140,6 +1157,7 @@ def _rasterize_polygons_range_engine(
                 i,
                 exteriors_coords,
                 exteriors_offsets,
+                exterior_lengths,
                 interiors_coords,
                 interiors_ring_offsets,
                 interiors_poly_offsets,
@@ -1162,6 +1180,7 @@ def _rasterize_polygons_range_engine(
                 i,
                 exteriors_coords,
                 exteriors_offsets,
+                exterior_lengths,
                 interiors_coords,
                 interiors_ring_offsets,
                 interiors_poly_offsets,

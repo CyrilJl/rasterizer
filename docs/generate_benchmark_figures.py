@@ -10,7 +10,7 @@ from shapely.geometry import Point, Polygon, box
 
 SAVE_PATH = Path("docs/_static")
 CSV_PATH = SAVE_PATH / "polygon_threshold_benchmark.csv"
-CURRENT_THRESHOLD = 81
+CURRENT_THRESHOLD = 36
 
 OCCUPANCY_COLORS = {
     "0.00-0.15": "#b91c1c",

@@ -21,7 +21,7 @@ math and faster scanline-style filling than a general rasterization engine can u
 - small polygon bounding boxes use an exact engine that clips the polygon against every candidate cell
 - larger polygon bounding boxes use a hybrid engine that clips only boundary cells exactly and fills the interior with scanline spans
 
-The switch happens from an internal bbox-size threshold measured in grid cells. In the current implementation, that threshold is ``81`` cells.
+The switch happens from an internal bbox-size threshold measured in grid cells. In the current implementation, that threshold is ``36`` cells.
 
 .. figure:: _static/algorithm_flow.svg
    :alt: Flow chart showing the switch between the exact and hybrid polygon rasterization paths.
@@ -131,7 +131,7 @@ For every candidate threshold, the benchmark computes the aggregate runtime obta
 - the exact path when ``bbox_cells <= threshold``
 - the hybrid path otherwise
 
-The resulting curve is shallow near the optimum: several very small thresholds perform almost the same. In the current benchmark snapshot, the best observed aggregate time lands at the lowest tested cutoff, but ``81`` cells stays within about ``0.06%`` of that best total while still reserving the exact path for genuinely tiny polygon bboxes.
+The resulting curve is shallow near the optimum: several very small thresholds perform almost the same. In the current benchmark snapshot, the best observed aggregate time lands at the lowest tested cutoff, so the implementation uses a very small cutoff while still reserving the exact path for only the tiniest polygon bboxes.
 
 .. figure:: _static/polygon_threshold_curve.svg
    :alt: Aggregate threshold-search curve showing that the performance optimum is broad and close to very small cutoffs.
