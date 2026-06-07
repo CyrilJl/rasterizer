@@ -115,7 +115,7 @@ def _repeated_ring_indexes(ring_counts: np.ndarray) -> np.ndarray:
 
 
 def _polygon_parts_and_indexes(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray]:
-    geoms = geometry_series(polygons).array
+    geoms = np.asarray(geometry_series(polygons).array, dtype=object)
     part_counts = np.asarray(get_num_geometries(geoms), dtype=np.intp)
     if np.all(part_counts == 1):
         return geoms, np.arange(len(geoms), dtype=np.intp)
@@ -128,15 +128,14 @@ def _polygon_parts_and_indexes(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> tu
     part_indexes = np.repeat(np.arange(len(geoms), dtype=np.intp), part_counts)
     parts = np.empty(total_parts, dtype=object)
 
-    geom_objects = np.asarray(geoms, dtype=object)
     single_mask = part_counts == 1
-    parts[part_offsets[:-1][single_mask]] = geom_objects[single_mask]
+    parts[part_offsets[:-1][single_mask]] = geoms[single_mask]
 
     for geom_idx in np.flatnonzero(~single_mask):
         start = part_offsets[geom_idx]
         end = part_offsets[geom_idx + 1]
         if start < end:
-            parts[start:end] = get_parts(geom_objects[geom_idx])
+            parts[start:end] = get_parts(geoms[geom_idx])
 
     return parts, part_indexes
 

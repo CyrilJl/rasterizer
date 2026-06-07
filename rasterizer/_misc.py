@@ -86,7 +86,7 @@ def prepare_vector_input(
             UserWarning,
             stacklevel=2,
         )
-        return data.set_crs(crs, allow_override=True), resolved_crs
+        return cast(gpd.GeoDataFrame | gpd.GeoSeries, data.set_crs(crs, allow_override=True)), resolved_crs
     return data.to_crs(crs), resolved_crs
 
 
