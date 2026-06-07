@@ -455,19 +455,6 @@ def _rasterize_lines_engine(
 
 
 @njit(cache=True)
-def _polygon_area_numba(coords: np.ndarray) -> float:
-    """Calculates the area of a polygon."""
-    if len(coords) < 3:
-        return 0.0
-    area = 0.0
-    for i in range(len(coords)):
-        j = (i + 1) % len(coords)
-        area += coords[i, 0] * coords[j, 1]
-        area -= coords[j, 0] * coords[i, 1]
-    return abs(area) / 2.0
-
-
-@njit(cache=True)
 def _clip_polygon_area_to_box_numba(
     subject_coords: np.ndarray,
     xmin: float,
@@ -934,99 +921,6 @@ def _rasterize_polygon_bbox_hybrid(
                     raster_data[iy, ix] = 1
                 else:
                     raster_data[iy, ix] += area * weight
-
-
-@njit(cache=True)
-def _rasterize_polygons_exact_engine(
-    num_polygons: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
-    exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
-    interiors_poly_offsets: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    half_dx: float,
-    half_dy: float,
-    x_grid_min: float,
-    x_grid_max: float,
-    y_grid_min: float,
-    y_grid_max: float,
-    mode_is_binary: bool,
-    weights: np.ndarray,
-) -> np.ndarray:
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-    x0 = x[0]
-    y0 = y[0]
-    inv_dx = 1.0 / (2.0 * half_dx)
-    inv_dy = 1.0 / (2.0 * half_dy)
-    nx = len(x)
-    ny = len(y)
-    max_ring_vertices = 1
-    for i in range(num_polygons):
-        ring_vertices, _total_vertices = _polygon_ring_vertex_counts_numba(
-            i,
-            exteriors_offsets,
-            exterior_lengths,
-            interiors_ring_offsets,
-            interiors_poly_offsets,
-        )
-        if ring_vertices > max_ring_vertices:
-            max_ring_vertices = ring_vertices
-
-    scratch_capacity = max_ring_vertices + 8
-    scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
-    scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
-
-    for i in range(num_polygons):
-        weight = weights[i]
-        ext_start = exteriors_offsets[i]
-        ext_end = ext_start + exterior_lengths[i]
-        poly_xmin, poly_ymin, poly_xmax, poly_ymax = _ring_bounds_numba(exteriors_coords, ext_start, ext_end)
-
-        if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
-            continue
-
-        ix_start, ix_end, iy_start, iy_end = _bbox_indices_regular_grid(
-            poly_xmin,
-            poly_ymin,
-            poly_xmax,
-            poly_ymax,
-            x0,
-            y0,
-            inv_dx,
-            inv_dy,
-            half_dx,
-            half_dy,
-            nx,
-            ny,
-        )
-
-        _rasterize_polygon_bbox_exact(
-            i,
-            exteriors_coords,
-            exteriors_offsets,
-            exterior_lengths,
-            interiors_coords,
-            interiors_ring_offsets,
-            interiors_poly_offsets,
-            x,
-            y,
-            half_dx,
-            half_dy,
-            mode_is_binary,
-            weight,
-            ix_start,
-            ix_end,
-            iy_start,
-            iy_end,
-            raster_data,
-            scratch_a,
-            scratch_b,
-        )
-
-    return raster_data
 
 
 @njit(cache=True)
