@@ -1,6 +1,21 @@
 Changelog
 =========
 
+v0.3.5
+------
+
+Unreleased.
+
+This release replaces the default large-polygon engine with a signed per-edge area accumulation path and trims polygon preprocessing memory.
+
+- large polygons (bbox above the exact-clipping threshold) are now rasterized by accumulating signed trapezoid areas and covers per edge-cell crossing, then filling interiors with a row sweep; cost drops from ``O(vertices x boundary cells + rows x vertices)`` to ``O(edge-cell crossings + bbox)``
+- the previous hybrid path is retained behind an internal vertex threshold as a fallback; forcing it remains covered by the test suite
+- exact and hybrid clipping now skip interior rings whose bounding box does not touch the cell, which alone gave ~4x on a 500-polygons-with-50-holes workload
+- interior ring coordinates are sliced from the single all-coordinates array instead of being extracted a second time, removing a duplicate coordinate copy and one extraction pass
+- added a regression test for the polygon clip scratch overflow fixed in ``5f7c540`` and randomized cross-strategy equivalence tests (jagged stars, grid-overhanging polygons, multi-hole polygons)
+
+On the local review workloads the new default measured 2.8x (100k small mixed polygons) to 36x (one 16k-vertex circle) faster; the Paris building showcase (606,667 polygons, 10 m grid) went from ``6.7 s`` to ``3.9 s``.
+
 v0.3.4
 ------
 
