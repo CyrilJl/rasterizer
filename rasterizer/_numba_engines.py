@@ -544,10 +544,307 @@ def _clip_polygon_area_to_box_grow(
 
 
 @njit(cache=True)
+def _clip_ring_to_box_bounded(
+    subject_coords: np.ndarray,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
+) -> int:
+    """Clips a ring to a rectangular box, leaving the clipped ring in ``scratch_a``.
+
+    Same Sutherland-Hodgman stages as ``_clip_polygon_area_to_box_bounded`` but
+    keeps the vertices instead of reducing them to an area. Returns the clipped
+    vertex count, or -1 if the scratch buffers are too small (the four-stage
+    ping-pong always ends back in ``scratch_a``).
+    """
+    count = len(subject_coords)
+    if count < 3:
+        return 0
+    if scratch_a.shape[0] < count:
+        return -1
+
+    for i in range(count):
+        scratch_a[i, 0] = subject_coords[i, 0]
+        scratch_a[i, 1] = subject_coords[i, 1]
+
+    use_first_buffer = True
+    for edge in range(4):
+        if count == 0:
+            return 0
+
+        if use_first_buffer:
+            src = scratch_a
+            dst = scratch_b
+        else:
+            src = scratch_b
+            dst = scratch_a
+
+        value = xmin
+        if edge == 1:
+            value = xmax
+        elif edge == 2:
+            value = ymin
+        elif edge == 3:
+            value = ymax
+
+        if dst.shape[0] < 2 * count:
+            return -1
+
+        output_count = 0
+        p1x = src[count - 1, 0]
+        p1y = src[count - 1, 1]
+        if edge == 0:
+            p1_inside = p1x >= value
+        elif edge == 1:
+            p1_inside = p1x <= value
+        elif edge == 2:
+            p1_inside = p1y >= value
+        else:
+            p1_inside = p1y <= value
+
+        for p2_idx in range(count):
+            p2x = src[p2_idx, 0]
+            p2y = src[p2_idx, 1]
+            if edge == 0:
+                p2_inside = p2x >= value
+            elif edge == 1:
+                p2_inside = p2x <= value
+            elif edge == 2:
+                p2_inside = p2y >= value
+            else:
+                p2_inside = p2y <= value
+
+            if p2_inside:
+                if not p1_inside:
+                    if edge < 2:
+                        dst[output_count, 0] = value
+                        dst[output_count, 1] = p1y + (p2y - p1y) * (value - p1x) / (p2x - p1x)
+                    else:
+                        dst[output_count, 1] = value
+                        dst[output_count, 0] = p1x + (p2x - p1x) * (value - p1y) / (p2y - p1y)
+                    output_count += 1
+                dst[output_count, 0] = p2x
+                dst[output_count, 1] = p2y
+                output_count += 1
+            elif p1_inside:
+                if edge < 2:
+                    dst[output_count, 0] = value
+                    dst[output_count, 1] = p1y + (p2y - p1y) * (value - p1x) / (p2x - p1x)
+                else:
+                    dst[output_count, 1] = value
+                    dst[output_count, 0] = p1x + (p2x - p1x) * (value - p1y) / (p2y - p1y)
+                output_count += 1
+
+            p1x = p2x
+            p1y = p2y
+            p1_inside = p2_inside
+
+        count = output_count
+        use_first_buffer = not use_first_buffer
+
+    return count
+
+
+@njit(cache=True)
+def _clip_ring_to_box_grow(
+    subject_coords: np.ndarray,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    start_capacity: int,
+) -> tuple[np.ndarray, int]:
+    """Cold path: the ring outgrew the scratch buffers; retry with larger ones."""
+    capacity = 2 * start_capacity + 2 * len(subject_coords) + 16
+    while True:
+        grown_a = np.empty((capacity, 2), dtype=np.float64)
+        grown_b = np.empty((capacity, 2), dtype=np.float64)
+        count = _clip_ring_to_box_bounded(subject_coords, xmin, ymin, xmax, ymax, grown_a, grown_b)
+        if count >= 0:
+            return grown_a, count
+        capacity *= 2
+
+
+@njit(cache=True)
+def _ring_signed_area(ring_coords: np.ndarray, count: int) -> float:
+    area = 0.0
+    for i in range(count):
+        j = i + 1
+        if j == count:
+            j = 0
+        area += ring_coords[i, 0] * ring_coords[j, 1]
+        area -= ring_coords[j, 0] * ring_coords[i, 1]
+    return 0.5 * area
+
+
+@njit(cache=True)
+def _accumulate_ring_edges(
+    ring_coords: np.ndarray,
+    count: int,
+    orientation: float,
+    dx: float,
+    dy: float,
+    inv_dx: float,
+    inv_dy: float,
+    x_grid_min: float,
+    y_grid_min: float,
+    ix_start: int,
+    iy_start: int,
+    area_acc: np.ndarray,
+    cover_acc: np.ndarray,
+) -> None:
+    """Adds a ring's signed trapezoid areas and covers to the window accumulators.
+
+    For the sub-segment of each edge inside a cell, ``area_acc`` gains the
+    signed area between the sub-segment and the cell's left edge and
+    ``cover_acc`` gains the signed dy. The final sub-segment of every edge ends
+    exactly on the edge endpoint so covers telescope to zero over a closed
+    ring, keeping the row sweep exact outside the polygon.
+    """
+    bbox_height, bbox_width = area_acc.shape
+    for i in range(count):
+        xa = ring_coords[i, 0]
+        ya = ring_coords[i, 1]
+        j = i + 1
+        if j == count:
+            j = 0
+        xb = ring_coords[j, 0]
+        yb = ring_coords[j, 1]
+
+        # Horizontal edges have no dy: no cover and no trapezoid area.
+        if ya == yb:
+            continue
+
+        vx = xb - xa
+        vy = yb - ya
+        t_current = 0.0
+        t_next_x, t_delta_x = _initial_incremental_crossing_t(xa, xa, vx, x_grid_min, dx, inv_dx, 0.0)
+        t_next_y, t_delta_y = _initial_incremental_crossing_t(ya, ya, vy, y_grid_min, dy, inv_dy, 0.0)
+
+        x_sub_start = xa
+        y_sub_start = ya
+        while True:
+            t_next = t_next_x
+            if t_next_y < t_next:
+                t_next = t_next_y
+            is_last = t_next >= 1.0 - _GRID_EPS
+            if is_last:
+                x_sub_end = xb
+                y_sub_end = yb
+            else:
+                x_sub_end = xa + vx * t_next
+                y_sub_end = ya + vy * t_next
+
+            x_mid = 0.5 * (x_sub_start + x_sub_end)
+            y_mid = 0.5 * (y_sub_start + y_sub_end)
+            local_ix = _grid_cell_index(x_mid, x_grid_min, inv_dx) - ix_start
+            local_iy = _grid_cell_index(y_mid, y_grid_min, inv_dy) - iy_start
+            if local_ix < 0:
+                local_ix = 0
+            elif local_ix >= bbox_width:
+                local_ix = bbox_width - 1
+            if local_iy < 0:
+                local_iy = 0
+            elif local_iy >= bbox_height:
+                local_iy = bbox_height - 1
+
+            cell_xmin = x_grid_min + (ix_start + local_ix) * dx
+            segment_dy = y_sub_end - y_sub_start
+            area_acc[local_iy, local_ix] += (
+                orientation * 0.5 * ((x_sub_start - cell_xmin) + (x_sub_end - cell_xmin)) * segment_dy
+            )
+            cover_acc[local_iy, local_ix] += orientation * segment_dy
+
+            if is_last:
+                break
+            t_current = t_next
+            x_sub_start = x_sub_end
+            y_sub_start = y_sub_end
+            if t_next_x <= t_current + _GRID_EPS:
+                t_next_x += t_delta_x
+            if t_next_y <= t_current + _GRID_EPS:
+                t_next_y += t_delta_y
+
+
+@njit(cache=True)
+def _accumulate_ring_maybe_clipped(
+    ring_coords: np.ndarray,
+    is_hole: bool,
+    ring_xmin: float,
+    ring_ymin: float,
+    ring_xmax: float,
+    ring_ymax: float,
+    win_xmin: float,
+    win_ymin: float,
+    win_xmax: float,
+    win_ymax: float,
+    dx: float,
+    dy: float,
+    inv_dx: float,
+    inv_dy: float,
+    x_grid_min: float,
+    y_grid_min: float,
+    ix_start: int,
+    iy_start: int,
+    area_acc: np.ndarray,
+    cover_acc: np.ndarray,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
+) -> None:
+    if ring_xmax < win_xmin or ring_xmin > win_xmax or ring_ymax < win_ymin or ring_ymin > win_ymax:
+        return
+
+    if ring_xmin >= win_xmin and ring_xmax <= win_xmax and ring_ymin >= win_ymin and ring_ymax <= win_ymax:
+        ring = ring_coords
+        count = len(ring_coords)
+    else:
+        # The window was clamped to the grid: clip the ring to it so travel
+        # along the window boundary keeps the winding closed.
+        count = _clip_ring_to_box_bounded(ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, scratch_a, scratch_b)
+        if count < 0:
+            ring, count = _clip_ring_to_box_grow(
+                ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, scratch_a.shape[0]
+            )
+        else:
+            ring = scratch_a
+
+    if count < 3:
+        return
+
+    # The accumulation is signed: traverse exteriors CCW and holes CW,
+    # flipping rings whose stored winding disagrees.
+    signed_area = _ring_signed_area(ring, count)
+    if signed_area == 0.0:
+        return
+    orientation = 1.0 if signed_area > 0.0 else -1.0
+    if is_hole:
+        orientation = -orientation
+
+    _accumulate_ring_edges(
+        ring,
+        count,
+        orientation,
+        dx,
+        dy,
+        inv_dx,
+        inv_dy,
+        x_grid_min,
+        y_grid_min,
+        ix_start,
+        iy_start,
+        area_acc,
+        cover_acc,
+    )
+
+
+@njit(cache=True)
 def _polygon_ring_vertex_counts_numba(
     polygon_idx: int,
     exterior_lengths: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
+    interiors_ring_counts: np.ndarray,
     interiors_poly_offsets: np.ndarray,
 ) -> tuple[int, int]:
     exterior_vertices = exterior_lengths[polygon_idx]
@@ -557,7 +854,7 @@ def _polygon_ring_vertex_counts_numba(
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
 
     for j in range(poly_int_start, poly_int_end):
-        ring_vertices = interiors_ring_offsets[j + 1] - interiors_ring_offsets[j]
+        ring_vertices = interiors_ring_counts[j]
         total_vertices += ring_vertices
         if ring_vertices > max_vertices:
             max_vertices = ring_vertices
@@ -566,14 +863,36 @@ def _polygon_ring_vertex_counts_numba(
 
 
 @njit(cache=True)
+def _fill_interior_ring_bounds(
+    polygon_idx: int,
+    coords: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    interior_ring_bounds: np.ndarray,
+) -> None:
+    poly_int_start = interiors_poly_offsets[polygon_idx]
+    poly_int_end = interiors_poly_offsets[polygon_idx + 1]
+    for j in range(poly_int_start, poly_int_end):
+        int_start = interiors_ring_starts[j]
+        xmin, ymin, xmax, ymax = _ring_bounds_numba(coords, int_start, int_start + interiors_ring_counts[j])
+        local_ring = j - poly_int_start
+        interior_ring_bounds[local_ring, 0] = xmin
+        interior_ring_bounds[local_ring, 1] = ymin
+        interior_ring_bounds[local_ring, 2] = xmax
+        interior_ring_bounds[local_ring, 3] = ymax
+
+
+@njit(cache=True)
 def _clip_polygon_cell_area_numba(
     polygon_idx: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
+    coords: np.ndarray,
+    coords_offsets: np.ndarray,
     exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
     interiors_poly_offsets: np.ndarray,
+    interior_ring_bounds: np.ndarray,
     cell_xmin: float,
     cell_ymin: float,
     cell_xmax: float,
@@ -581,9 +900,9 @@ def _clip_polygon_cell_area_numba(
     scratch_a: np.ndarray,
     scratch_b: np.ndarray,
 ) -> float:
-    ext_start = exteriors_offsets[polygon_idx]
+    ext_start = coords_offsets[polygon_idx]
     ext_end = ext_start + exterior_lengths[polygon_idx]
-    exterior_coords = exteriors_coords[ext_start:ext_end]
+    exterior_coords = coords[ext_start:ext_end]
     area = _clip_polygon_area_to_box_bounded(
         exterior_coords,
         cell_xmin,
@@ -602,9 +921,18 @@ def _clip_polygon_cell_area_numba(
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
 
     for j in range(poly_int_start, poly_int_end):
-        int_start = interiors_ring_offsets[j]
-        int_end = interiors_ring_offsets[j + 1]
-        interior_coords = interiors_coords[int_start:int_end]
+        local_ring = j - poly_int_start
+        if (
+            interior_ring_bounds[local_ring, 2] < cell_xmin
+            or interior_ring_bounds[local_ring, 0] > cell_xmax
+            or interior_ring_bounds[local_ring, 3] < cell_ymin
+            or interior_ring_bounds[local_ring, 1] > cell_ymax
+        ):
+            continue
+
+        int_start = interiors_ring_starts[j]
+        int_end = int_start + interiors_ring_counts[j]
+        interior_coords = coords[int_start:int_end]
         ring_area = _clip_polygon_area_to_box_bounded(
             interior_coords,
             cell_xmin,
@@ -724,12 +1052,13 @@ def _sort_intersections_in_place(intersections: np.ndarray, count: int) -> None:
 @njit(cache=True)
 def _rasterize_polygon_bbox_exact(
     polygon_idx: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
+    coords: np.ndarray,
+    coords_offsets: np.ndarray,
     exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
     interiors_poly_offsets: np.ndarray,
+    interior_ring_bounds: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     half_dx: float,
@@ -755,12 +1084,13 @@ def _rasterize_polygon_bbox_exact(
             cell_xmax = x[ix] + half_dx
             area = _clip_polygon_cell_area_numba(
                 polygon_idx,
-                exteriors_coords,
-                exteriors_offsets,
+                coords,
+                coords_offsets,
                 exterior_lengths,
-                interiors_coords,
-                interiors_ring_offsets,
+                interiors_ring_starts,
+                interiors_ring_counts,
                 interiors_poly_offsets,
+                interior_ring_bounds,
                 cell_xmin,
                 cell_ymin,
                 cell_xmax,
@@ -779,12 +1109,13 @@ def _rasterize_polygon_bbox_exact(
 @njit(cache=True)
 def _rasterize_polygon_bbox_hybrid(
     polygon_idx: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
+    coords: np.ndarray,
+    coords_offsets: np.ndarray,
     exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
     interiors_poly_offsets: np.ndarray,
+    interior_ring_bounds: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     half_dx: float,
@@ -806,9 +1137,9 @@ def _rasterize_polygon_bbox_hybrid(
     # cells by scanline spans because the polygon boundary does not cross them.
     boundary_mask = np.zeros((bbox_height, bbox_width), dtype=np.uint8)
 
-    ext_start = exteriors_offsets[polygon_idx]
+    ext_start = coords_offsets[polygon_idx]
     ext_end = ext_start + exterior_lengths[polygon_idx]
-    exterior_coords = exteriors_coords[ext_start:ext_end]
+    exterior_coords = coords[ext_start:ext_end]
 
     _mark_boundary_cells_for_ring(
         exterior_coords,
@@ -827,9 +1158,9 @@ def _rasterize_polygon_bbox_hybrid(
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
 
     for j in range(poly_int_start, poly_int_end):
-        int_start = interiors_ring_offsets[j]
-        int_end = interiors_ring_offsets[j + 1]
-        interior_coords = interiors_coords[int_start:int_end]
+        int_start = interiors_ring_starts[j]
+        int_end = int_start + interiors_ring_counts[j]
+        interior_coords = coords[int_start:int_end]
         _mark_boundary_cells_for_ring(
             interior_coords,
             x,
@@ -853,9 +1184,9 @@ def _rasterize_polygon_bbox_hybrid(
         scan_y = y[iy]
         count = _append_scanline_intersections(exterior_coords, scan_y, intersections, 0)
         for j in range(poly_int_start, poly_int_end):
-            int_start = interiors_ring_offsets[j]
-            int_end = interiors_ring_offsets[j + 1]
-            interior_coords = interiors_coords[int_start:int_end]
+            int_start = interiors_ring_starts[j]
+            int_end = int_start + interiors_ring_counts[j]
+            interior_coords = coords[int_start:int_end]
             count = _append_scanline_intersections(interior_coords, scan_y, intersections, count)
 
         if count < 2:
@@ -896,12 +1227,13 @@ def _rasterize_polygon_bbox_hybrid(
             cell_xmax = x[ix] + half_dx
             area = _clip_polygon_cell_area_numba(
                 polygon_idx,
-                exteriors_coords,
-                exteriors_offsets,
+                coords,
+                coords_offsets,
                 exterior_lengths,
-                interiors_coords,
-                interiors_ring_offsets,
+                interiors_ring_starts,
+                interiors_ring_counts,
                 interiors_poly_offsets,
+                interior_ring_bounds,
                 cell_xmin,
                 cell_ymin,
                 cell_xmax,
@@ -918,14 +1250,141 @@ def _rasterize_polygon_bbox_hybrid(
 
 
 @njit(cache=True)
+def _rasterize_polygon_bbox_accum(
+    polygon_idx: int,
+    coords: np.ndarray,
+    coords_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+    interior_ring_bounds: np.ndarray,
+    poly_xmin: float,
+    poly_ymin: float,
+    poly_xmax: float,
+    poly_ymax: float,
+    x: np.ndarray,
+    y: np.ndarray,
+    half_dx: float,
+    half_dy: float,
+    mode_is_binary: bool,
+    weight: float,
+    ix_start: int,
+    ix_end: int,
+    iy_start: int,
+    iy_end: int,
+    raster_data: np.ndarray,
+    scratch_a: np.ndarray,
+    scratch_b: np.ndarray,
+) -> None:
+    """Rasterizes one polygon by signed per-edge area/cover accumulation.
+
+    Each edge distributes a signed trapezoid area and a signed dy cover over
+    the cells it crosses; a left-to-right sweep then turns the running cover
+    into whole-cell interior areas, so boundary cells and interior fill both
+    cost O(edge-cell crossings + bbox) instead of O(vertices x boundary cells).
+    """
+    bbox_width = ix_end - ix_start
+    bbox_height = iy_end - iy_start
+    dx = 2.0 * half_dx
+    dy = 2.0 * half_dy
+    inv_dx = 1.0 / dx
+    inv_dy = 1.0 / dy
+    x_grid_min = x[0] - half_dx
+    y_grid_min = y[0] - half_dy
+    win_xmin = x_grid_min + ix_start * dx
+    win_xmax = x_grid_min + ix_end * dx
+    win_ymin = y_grid_min + iy_start * dy
+    win_ymax = y_grid_min + iy_end * dy
+
+    area_acc = np.zeros((bbox_height, bbox_width), dtype=np.float64)
+    cover_acc = np.zeros((bbox_height, bbox_width), dtype=np.float64)
+
+    ext_start = coords_offsets[polygon_idx]
+    ext_end = ext_start + exterior_lengths[polygon_idx]
+    _accumulate_ring_maybe_clipped(
+        coords[ext_start:ext_end],
+        False,
+        poly_xmin,
+        poly_ymin,
+        poly_xmax,
+        poly_ymax,
+        win_xmin,
+        win_ymin,
+        win_xmax,
+        win_ymax,
+        dx,
+        dy,
+        inv_dx,
+        inv_dy,
+        x_grid_min,
+        y_grid_min,
+        ix_start,
+        iy_start,
+        area_acc,
+        cover_acc,
+        scratch_a,
+        scratch_b,
+    )
+
+    poly_int_start = interiors_poly_offsets[polygon_idx]
+    poly_int_end = interiors_poly_offsets[polygon_idx + 1]
+    for j in range(poly_int_start, poly_int_end):
+        local_ring = j - poly_int_start
+        int_start = interiors_ring_starts[j]
+        int_end = int_start + interiors_ring_counts[j]
+        _accumulate_ring_maybe_clipped(
+            coords[int_start:int_end],
+            True,
+            interior_ring_bounds[local_ring, 0],
+            interior_ring_bounds[local_ring, 1],
+            interior_ring_bounds[local_ring, 2],
+            interior_ring_bounds[local_ring, 3],
+            win_xmin,
+            win_ymin,
+            win_xmax,
+            win_ymax,
+            dx,
+            dy,
+            inv_dx,
+            inv_dy,
+            x_grid_min,
+            y_grid_min,
+            ix_start,
+            iy_start,
+            area_acc,
+            cover_acc,
+            scratch_a,
+            scratch_b,
+        )
+
+    # Row sweep: the covered area of a cell is its own trapezoid contributions
+    # plus the winding measure of the polygon on the cell's right boundary
+    # (minus the running cover, current cell included) times the cell width.
+    # Cells untouched by any edge get 0 outside and the full cell area inside.
+    for local_iy in range(bbox_height):
+        iy = iy_start + local_iy
+        running_cover = 0.0
+        for local_ix in range(bbox_width):
+            running_cover -= cover_acc[local_iy, local_ix]
+            covered = area_acc[local_iy, local_ix] + running_cover * dx
+            if covered > 1e-9:
+                ix = ix_start + local_ix
+                if mode_is_binary:
+                    raster_data[iy, ix] = 1
+                else:
+                    raster_data[iy, ix] += covered * weight
+
+
+@njit(cache=True)
 def _rasterize_polygons_range_engine(
     start_polygon_idx: int,
     end_polygon_idx: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
+    coords: np.ndarray,
+    coords_offsets: np.ndarray,
     exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
+    interiors_ring_starts: np.ndarray,
+    interiors_ring_counts: np.ndarray,
     interiors_poly_offsets: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
@@ -938,6 +1397,7 @@ def _rasterize_polygons_range_engine(
     mode_is_binary: bool,
     weights: np.ndarray,
     large_polygon_threshold_cells: int,
+    accum_threshold_vertices: int,
     raster_data: np.ndarray,
 ) -> None:
     x0 = x[0]
@@ -948,17 +1408,21 @@ def _rasterize_polygons_range_engine(
     ny = len(y)
     max_ring_vertices = 1
     max_total_ring_vertices = 1
+    max_interior_rings = 1
     for i in range(start_polygon_idx, end_polygon_idx):
         ring_vertices, total_vertices = _polygon_ring_vertex_counts_numba(
             i,
             exterior_lengths,
-            interiors_ring_offsets,
+            interiors_ring_counts,
             interiors_poly_offsets,
         )
         if ring_vertices > max_ring_vertices:
             max_ring_vertices = ring_vertices
         if total_vertices > max_total_ring_vertices:
             max_total_ring_vertices = total_vertices
+        interior_rings = interiors_poly_offsets[i + 1] - interiors_poly_offsets[i]
+        if interior_rings > max_interior_rings:
+            max_interior_rings = interior_rings
 
     # One clip stage emits at most two vertices per input vertex, so 2x the
     # largest ring covers it; _clip_polygon_area_to_box_grow handles the rare
@@ -967,12 +1431,13 @@ def _rasterize_polygons_range_engine(
     scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
     scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
     intersections = np.empty(max_total_ring_vertices, dtype=np.float64)
+    interior_ring_bounds = np.empty((max_interior_rings, 4), dtype=np.float64)
 
     for i in range(start_polygon_idx, end_polygon_idx):
         weight = weights[i]
-        ext_start = exteriors_offsets[i]
+        ext_start = coords_offsets[i]
         ext_end = ext_start + exterior_lengths[i]
-        poly_xmin, poly_ymin, poly_xmax, poly_ymax = _ring_bounds_numba(exteriors_coords, ext_start, ext_end)
+        poly_xmin, poly_ymin, poly_xmax, poly_ymax = _ring_bounds_numba(coords, ext_start, ext_end)
 
         if poly_xmax < x_grid_min or poly_xmin > x_grid_max or poly_ymax < y_grid_min or poly_ymin > y_grid_max:
             continue
@@ -992,16 +1457,27 @@ def _rasterize_polygons_range_engine(
             ny,
         )
 
+        if interiors_poly_offsets[i + 1] > interiors_poly_offsets[i]:
+            _fill_interior_ring_bounds(
+                i,
+                coords,
+                interiors_ring_starts,
+                interiors_ring_counts,
+                interiors_poly_offsets,
+                interior_ring_bounds,
+            )
+
         bbox_cell_count = (ix_end - ix_start) * (iy_end - iy_start)
         if bbox_cell_count <= large_polygon_threshold_cells:
             _rasterize_polygon_bbox_exact(
                 i,
-                exteriors_coords,
-                exteriors_offsets,
+                coords,
+                coords_offsets,
                 exterior_lengths,
-                interiors_coords,
-                interiors_ring_offsets,
+                interiors_ring_starts,
+                interiors_ring_counts,
                 interiors_poly_offsets,
+                interior_ring_bounds,
                 x,
                 y,
                 half_dx,
@@ -1017,26 +1493,62 @@ def _rasterize_polygons_range_engine(
                 scratch_b,
             )
         else:
-            _rasterize_polygon_bbox_hybrid(
+            _, poly_total_vertices = _polygon_ring_vertex_counts_numba(
                 i,
-                exteriors_coords,
-                exteriors_offsets,
                 exterior_lengths,
-                interiors_coords,
-                interiors_ring_offsets,
+                interiors_ring_counts,
                 interiors_poly_offsets,
-                x,
-                y,
-                half_dx,
-                half_dy,
-                mode_is_binary,
-                weight,
-                ix_start,
-                ix_end,
-                iy_start,
-                iy_end,
-                raster_data,
-                scratch_a,
-                scratch_b,
-                intersections,
             )
+            if poly_total_vertices > accum_threshold_vertices:
+                _rasterize_polygon_bbox_accum(
+                    i,
+                    coords,
+                    coords_offsets,
+                    exterior_lengths,
+                    interiors_ring_starts,
+                    interiors_ring_counts,
+                    interiors_poly_offsets,
+                    interior_ring_bounds,
+                    poly_xmin,
+                    poly_ymin,
+                    poly_xmax,
+                    poly_ymax,
+                    x,
+                    y,
+                    half_dx,
+                    half_dy,
+                    mode_is_binary,
+                    weight,
+                    ix_start,
+                    ix_end,
+                    iy_start,
+                    iy_end,
+                    raster_data,
+                    scratch_a,
+                    scratch_b,
+                )
+            else:
+                _rasterize_polygon_bbox_hybrid(
+                    i,
+                    coords,
+                    coords_offsets,
+                    exterior_lengths,
+                    interiors_ring_starts,
+                    interiors_ring_counts,
+                    interiors_poly_offsets,
+                    interior_ring_bounds,
+                    x,
+                    y,
+                    half_dx,
+                    half_dy,
+                    mode_is_binary,
+                    weight,
+                    ix_start,
+                    ix_end,
+                    iy_start,
+                    iy_end,
+                    raster_data,
+                    scratch_a,
+                    scratch_b,
+                    intersections,
+                )

@@ -6,6 +6,7 @@ import xarray as xr
 from shapely import (
     get_coordinates,
     get_interior_ring,
+    get_num_coordinates,
     get_num_interior_rings,
     get_parts,
 )
@@ -20,9 +21,16 @@ from ._misc import (
 )
 from ._numba_engines import _rasterize_polygons_range_engine
 
-# Above this bbox size, it is cheaper to fill interior spans and clip only
-# boundary cells than to clip every cell in the polygon bbox.
+# Above this bbox size, per-cell exact clipping loses to strategies that fill
+# the interior without clipping every cell.
 _HYBRID_POLYGON_THRESHOLD_CELLS = 36
+# Vertex count above which large polygons use signed per-edge area
+# accumulation (O(edge-cell crossings + bbox)) instead of hybrid boundary
+# clipping (O(vertices x boundary cells + rows x vertices + bbox)). Benchmarks
+# (dev/bench_review.py, 2026-07) showed accumulation ahead on every reference
+# workload down to 4-vertex polygons, so it is the default for every polygon
+# above the exact-clipping threshold; raise this to re-enable the hybrid path.
+_ACCUM_POLYGON_THRESHOLD_VERTICES = 0
 _PROGRESS_CHUNK_SIZE = 128
 
 
@@ -67,13 +75,13 @@ def _polygon_parts_and_indexes(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> tu
     return parts, np.asarray(part_indexes, dtype=np.intp)
 
 
-def _polygon_interior_coordinates_and_offsets(
+def _polygon_interior_ring_layout(
     polygons,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-ring vertex counts and polygon->ring offsets, without copying coordinates."""
     geoms = _geometry_array(polygons)
     ring_counts = np.asarray(get_num_interior_rings(geoms), dtype=np.intp)
     total_rings = int(ring_counts.sum())
-    interior_coord_counts = np.zeros(len(geoms), dtype=np.intp)
 
     interiors_poly_offsets = np.empty(len(geoms) + 1, dtype=np.intp)
     interiors_poly_offsets[0] = 0
@@ -81,27 +89,48 @@ def _polygon_interior_coordinates_and_offsets(
 
     if total_rings == 0:
         return (
-            np.empty((0, 2), dtype=np.float64),
-            np.array([0], dtype=np.intp),
+            np.empty(0, dtype=np.intp),
+            np.empty(0, dtype=np.intp),
             interiors_poly_offsets,
-            interior_coord_counts,
+            np.zeros(len(geoms), dtype=np.intp),
         )
 
     polygon_indexes = np.repeat(np.arange(len(geoms), dtype=np.intp), ring_counts)
     ring_indexes = _repeated_ring_indexes(ring_counts)
     rings = get_interior_ring(geoms.take(polygon_indexes), ring_indexes)
-    coords, coord_ring_indexes = get_coordinates(rings, return_index=True)
-    coords = np.ascontiguousarray(coords, dtype=np.float64)
-    coord_ring_indexes = np.asarray(coord_ring_indexes, dtype=np.intp)
+    interiors_ring_counts = np.asarray(get_num_coordinates(rings), dtype=np.intp)
+    interior_coord_counts = np.bincount(polygon_indexes, weights=interiors_ring_counts, minlength=len(geoms)).astype(
+        np.intp
+    )
 
-    coord_counts = np.bincount(coord_ring_indexes, minlength=total_rings)
-    interiors_ring_offsets = np.empty(total_rings + 1, dtype=np.intp)
-    interiors_ring_offsets[0] = 0
-    np.cumsum(coord_counts, out=interiors_ring_offsets[1:])
+    return polygon_indexes, interiors_ring_counts, interiors_poly_offsets, interior_coord_counts
 
-    interior_coord_counts = np.bincount(polygon_indexes, weights=coord_counts, minlength=len(geoms)).astype(np.intp)
 
-    return coords, interiors_ring_offsets, interiors_poly_offsets, interior_coord_counts
+def _interior_ring_starts(
+    coords_offsets: np.ndarray,
+    exterior_lengths: np.ndarray,
+    ring_polygon_indexes: np.ndarray,
+    interiors_ring_counts: np.ndarray,
+    interiors_poly_offsets: np.ndarray,
+) -> np.ndarray:
+    """Start index of each interior ring inside the all-coordinates array.
+
+    GEOS stores polygon coordinates as the exterior ring followed by the
+    interior rings in order, so interior rings can be sliced from the
+    all-coordinates array instead of being extracted a second time.
+    """
+    total_rings = len(interiors_ring_counts)
+    if total_rings == 0:
+        return np.empty(0, dtype=np.intp)
+
+    ring_prefix = np.cumsum(interiors_ring_counts) - interiors_ring_counts
+    per_polygon_ring_counts = np.diff(interiors_poly_offsets)
+    # First-ring prefix of each polygon; the clip only guards indexing for
+    # trailing polygons without rings (their repeat count is zero anyway).
+    first_ring_prefix = ring_prefix[np.minimum(interiors_poly_offsets[:-1], total_rings - 1)]
+    within_polygon_prefix = ring_prefix - np.repeat(first_ring_prefix, per_polygon_ring_counts)
+
+    return coords_offsets[ring_polygon_indexes] + exterior_lengths[ring_polygon_indexes] + within_polygon_prefix
 
 
 def _empty_polygon_raster(x: np.ndarray, y: np.ndarray, crs, mode: str) -> xr.DataArray:
@@ -198,14 +227,21 @@ def rasterize_polygons(
         return _empty_polygon_raster(x, y, crs, mode)
 
     (
-        interiors_coords,
-        interiors_ring_offsets,
+        ring_polygon_indexes,
+        interiors_ring_counts,
         interiors_poly_offsets,
         interior_coord_counts,
-    ) = _polygon_interior_coordinates_and_offsets(part_geometries)
-    exteriors_coords, exteriors_offsets, exterior_lengths = _polygon_all_coordinates_offsets_and_exterior_lengths(
+    ) = _polygon_interior_ring_layout(part_geometries)
+    coords, coords_offsets, exterior_lengths = _polygon_all_coordinates_offsets_and_exterior_lengths(
         part_geometries,
         interior_coord_counts,
+    )
+    interiors_ring_starts = _interior_ring_starts(
+        coords_offsets,
+        exterior_lengths,
+        ring_polygon_indexes,
+        interiors_ring_counts,
+        interiors_poly_offsets,
     )
 
     # uint8 for binary keeps the accumulation buffer 8x smaller than float64
@@ -219,11 +255,11 @@ def rasterize_polygons(
             _rasterize_polygons_range_engine(
                 start_idx,
                 end_idx,
-                exteriors_coords,
-                exteriors_offsets,
+                coords,
+                coords_offsets,
                 exterior_lengths,
-                interiors_coords,
-                interiors_ring_offsets,
+                interiors_ring_starts,
+                interiors_ring_counts,
                 interiors_poly_offsets,
                 x,
                 y,
@@ -236,6 +272,7 @@ def rasterize_polygons(
                 mode == "binary",
                 weights,
                 _HYBRID_POLYGON_THRESHOLD_CELLS,
+                _ACCUM_POLYGON_THRESHOLD_VERTICES,
                 raster_buffer,
             )
             progress.update(end_idx - start_idx)
