@@ -382,10 +382,35 @@ def _make_donut_polygon():
     return Polygon(shell.exterior.coords, [hole.exterior.coords])
 
 
+def _make_spiky_clip_overflow_polygon():
+    """Rectangle whose left side has 20 spikes poking across the grid line x=50.
+
+    Clipping this ring against a cell near x=50 crosses the clip line on every
+    spike, so one Sutherland-Hodgman stage emits far more vertices than the
+    ring holds. Regression geometry for the scratch overflow fixed in 5f7c540.
+    """
+    body_left = 50.05
+    coords = [(body_left, 10.0), (53.0, 10.0), (53.0, 40.0), (body_left, 40.0)]
+    for spike_y in np.linspace(39.3, 11.3, 20):
+        coords.append((body_left, spike_y + 0.3))
+        coords.append((49.5, spike_y))
+        coords.append((body_left, spike_y - 0.3))
+    return Polygon(coords)
+
+
+_POLYGON_STRATEGIES = ["direct", "hybrid", "accum"]
+
+
 def _force_polygon_strategy(monkeypatch, strategy):
     polygon_module = importlib.import_module("rasterizer.polygons")
-    threshold = 10**9 if strategy == "direct" else 0
-    monkeypatch.setattr(polygon_module, "_HYBRID_POLYGON_THRESHOLD_CELLS", threshold)
+    if strategy == "direct":
+        cells_threshold, vertices_threshold = 10**9, 10**9
+    elif strategy == "hybrid":
+        cells_threshold, vertices_threshold = 0, 10**9
+    else:  # accum
+        cells_threshold, vertices_threshold = 0, 0
+    monkeypatch.setattr(polygon_module, "_HYBRID_POLYGON_THRESHOLD_CELLS", cells_threshold)
+    monkeypatch.setattr(polygon_module, "_ACCUM_POLYGON_THRESHOLD_VERTICES", vertices_threshold)
 
 
 def _expected_polygon_areas(grid_gdf, gdf_polygons):
@@ -396,7 +421,7 @@ def _expected_polygon_areas(grid_gdf, gdf_polygons):
     return expected.fillna(0)["area"].values.reshape((len(Y), len(X)))
 
 
-@pytest.mark.parametrize("strategy", ["direct", "hybrid"])
+@pytest.mark.parametrize("strategy", _POLYGON_STRATEGIES)
 @pytest.mark.parametrize(
     ("mode", "expected_transform"),
     [
@@ -427,40 +452,126 @@ def test_rasterize_polygon_with_hole_matches_geopandas(
         np.testing.assert_array_equal(raster.values, expected)
 
 
-def test_rasterize_large_polygon_hybrid_matches_exact(grid, monkeypatch):
+@pytest.mark.parametrize("strategy", ["hybrid", "accum"])
+def test_rasterize_large_polygon_strategies_match_exact(grid, monkeypatch, strategy):
     """
-    Force both polygon engines and check they produce identical values.
+    Force each large-polygon engine and check it matches the exact one.
     """
     gdf_polygons = gpd.GeoDataFrame(geometry=[_make_donut_polygon()], crs=CRS)
 
     _force_polygon_strategy(monkeypatch, "direct")
     raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
 
-    _force_polygon_strategy(monkeypatch, "hybrid")
-    raster_hybrid = rasterize_polygons(gdf_polygons, **grid, mode="area")
+    _force_polygon_strategy(monkeypatch, strategy)
+    raster_strategy = rasterize_polygons(gdf_polygons, **grid, mode="area")
 
-    np.testing.assert_allclose(raster_hybrid.values, raster_exact.values)
+    np.testing.assert_allclose(raster_strategy.values, raster_exact.values)
 
 
-def test_rasterize_grid_aligned_polygon_hybrid_matches_exact(grid, monkeypatch):
+@pytest.mark.parametrize("strategy", ["hybrid", "accum"])
+def test_rasterize_grid_aligned_polygon_strategies_match_exact(grid, monkeypatch, strategy):
     """
-    Grid-aligned boundaries need adjacent boundary cells marked before interior fill.
+    Grid-aligned boundaries: cells left of a boundary lying exactly on a cell
+    line must stay empty while cells right of it fill completely.
     """
     gdf_polygons = gpd.GeoDataFrame(geometry=[box(10, 10, 70, 70)], crs=CRS)
 
     _force_polygon_strategy(monkeypatch, "direct")
     raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
 
-    _force_polygon_strategy(monkeypatch, "hybrid")
-    raster_hybrid = rasterize_polygons(gdf_polygons, **grid, mode="area")
+    _force_polygon_strategy(monkeypatch, strategy)
+    raster_strategy = rasterize_polygons(gdf_polygons, **grid, mode="area")
 
-    np.testing.assert_allclose(raster_hybrid.values, raster_exact.values)
+    np.testing.assert_allclose(raster_strategy.values, raster_exact.values)
 
 
-@pytest.mark.parametrize("strategy", ["direct", "hybrid"])
+def _make_jagged_star(rng, cx, cy, num_spikes, outer_radius, inner_radius):
+    angles = np.linspace(0.0, 2.0 * np.pi, 2 * num_spikes, endpoint=False)
+    radii = np.where(np.arange(2 * num_spikes) % 2 == 0, outer_radius, inner_radius)
+    radii = radii * rng.uniform(0.7, 1.0, size=radii.size)
+    points = np.column_stack((cx + radii * np.cos(angles), cy + radii * np.sin(angles)))
+    return Polygon(points).buffer(0)
+
+
+@pytest.mark.parametrize("strategy", ["hybrid", "accum"])
+def test_rasterize_randomized_polygons_match_exact(grid, monkeypatch, strategy):
+    """
+    Randomized jagged stars (some overhanging the grid edge) plus a donut:
+    every strategy must agree with per-cell exact clipping.
+    """
+    rng = np.random.default_rng(1234)
+    geometries = [_make_donut_polygon()]
+    for _ in range(50):
+        cx, cy = rng.uniform(10.0, 90.0, size=2)
+        num_spikes = int(rng.integers(6, 60))
+        geometries.append(_make_jagged_star(rng, cx, cy, num_spikes, rng.uniform(4.0, 12.0), rng.uniform(1.0, 3.0)))
+    # Overhang each grid edge to exercise window clipping of partially
+    # outside polygons.
+    for cx, cy in [(2.0, 50.0), (98.0, 50.0), (50.0, 2.0), (97.0, 97.0)]:
+        geometries.append(_make_jagged_star(rng, cx, cy, 24, 10.0, 3.0))
+    # Multi-hole polygons; the holes are CCW rings, exercising per-ring
+    # orientation normalization and the disjoint-hole precheck.
+    for _ in range(3):
+        cx, cy = rng.uniform(25.0, 75.0, size=2)
+        shell = box(cx - 12.0, cy - 12.0, cx + 12.0, cy + 12.0)
+        holes = []
+        for hole_col in range(3):
+            for hole_row in range(3):
+                ox = cx - 8.0 + 8.0 * hole_col + rng.uniform(-1.0, 1.0)
+                oy = cy - 8.0 + 8.0 * hole_row + rng.uniform(-1.0, 1.0)
+                holes.append(box(ox - 1.5, oy - 1.5, ox + 1.5, oy + 1.5).exterior.coords)
+        geometries.append(Polygon(shell.exterior.coords, holes))
+    gdf_polygons = gpd.GeoDataFrame(geometry=geometries, crs=CRS)
+
+    _force_polygon_strategy(monkeypatch, "direct")
+    raster_exact = rasterize_polygons(gdf_polygons, **grid, mode="area")
+    exact_binary = rasterize_polygons(gdf_polygons, **grid, mode="binary")
+
+    _force_polygon_strategy(monkeypatch, strategy)
+    raster_strategy = rasterize_polygons(gdf_polygons, **grid, mode="area")
+    strategy_binary = rasterize_polygons(gdf_polygons, **grid, mode="binary")
+
+    np.testing.assert_allclose(raster_strategy.values, raster_exact.values, rtol=1e-9, atol=1e-9)
+    np.testing.assert_array_equal(strategy_binary.values, exact_binary.values)
+
+
+@pytest.mark.parametrize("strategy", _POLYGON_STRATEGIES)
+@pytest.mark.parametrize(
+    ("mode", "expected_transform"),
+    [
+        ("area", lambda expected: expected),
+        ("binary", lambda expected: expected > 0),
+    ],
+)
+def test_rasterize_spiky_polygon_survives_clip_scratch_overflow(
+    grid,
+    grid_gdf,
+    monkeypatch,
+    strategy,
+    mode,
+    expected_transform,
+):
+    """
+    Regression test for the clip scratch overflow fixed in 5f7c540: rings that
+    cross a clip line many times outgrow the fixed scratch and must fall back
+    to the growing clip path instead of overflowing (previously a segfault).
+    """
+    _force_polygon_strategy(monkeypatch, strategy)
+    gdf_polygons = gpd.GeoDataFrame(geometry=[_make_spiky_clip_overflow_polygon()], crs=CRS)
+
+    expected = expected_transform(_expected_polygon_areas(grid_gdf, gdf_polygons))
+    raster = rasterize_polygons(gdf_polygons, **grid, mode=mode)
+
+    if mode == "area":
+        np.testing.assert_allclose(raster.values, expected, atol=1e-9)
+    else:
+        np.testing.assert_array_equal(raster.values, expected)
+
+
+@pytest.mark.parametrize("strategy", _POLYGON_STRATEGIES)
 def test_rasterize_large_polygon_with_hole_and_weight(grid, grid_gdf, monkeypatch, strategy):
     """
-    Check weighted donut polygons against GeoPandas on both direct and hybrid paths.
+    Check weighted donut polygons against GeoPandas on every strategy.
     """
     _force_polygon_strategy(monkeypatch, strategy)
     gdf_polygons = gpd.GeoDataFrame({"weight": [7.5]}, geometry=[_make_donut_polygon()], crs=CRS)
