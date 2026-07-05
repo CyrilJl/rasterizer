@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="940" height="600" viewBox="0 0 940 600" role="img" aria-labelledby="title desc">
   <title id="title">Polygon rasterization decision flow</title>
-  <desc id="desc">Flow chart showing the exact path for small polygon bounding boxes and the hybrid path for large bounding boxes.</desc>
+  <desc id="desc">Flow chart showing the exact path for small polygon bounding boxes and the area accumulation path for large bounding boxes.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L8,3 z" fill="#334155"/>
@@ -58,18 +58,18 @@
 
   <rect x="545" y="365" width="370" height="175" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="2.5"/>
   <text x="730" y="405" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="700" fill="#1d4ed8">
-    Hybrid path
+    Accumulation path
   </text>
   <text x="730" y="441" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#1e3a8a">
-    1. mark boundary cells crossed by
+    1. per edge, accumulate signed area
   </text>
   <text x="730" y="471" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#1e3a8a">
-    ring segments
+    and cover in each crossed cell
   </text>
   <text x="730" y="501" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#1e3a8a">
-    2. fill interior scanline spans, then
+    2. sweep each row: running cover
   </text>
   <text x="730" y="531" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#1e3a8a">
-    3. clip boundary cells exactly
+    fills the interior in bulk
   </text>
 </svg>

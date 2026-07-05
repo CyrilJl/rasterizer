@@ -11,7 +11,7 @@
 - Rasterize lines into a binary (presence/absence) or length-based grid.
 - Rasterize polygons into a binary (presence/absence) or area-based grid.
 - Fast because it targets regular rectilinear grids described by 1D `x` and `y` cell-center coordinates with constant spacing.
-- Hybrid polygon rasterization for large polygon bounding boxes: exact clipping on boundary cells, faster scanline filling for interior cells.
+- Fast large-polygon rasterization: exact per-cell clipping for tiny bounding boxes, signed per-edge area accumulation for everything larger, so cost scales with edge-cell crossings instead of vertices times boundary cells.
 - Weighted rasterization: Rasterize geometries while weighting the output by a numerical column in the GeoDataFrame.
 - Works with `geopandas` GeoDataFrames.
 - Outputs an `xarray.DataArray` for easy integration with other scientific Python libraries.
@@ -61,7 +61,7 @@ You can rasterize lines in either binary or length mode.
 
 You can rasterize polygons in either binary or area mode.
 
-For polygon workloads, `rasterizer` now uses two internal strategies. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones switch to a hybrid path that still clips boundary cells exactly, but fills interior spans with a scanline pass to reduce the amount of geometric clipping required. The resulting area and binary outputs stay exact at cell boundaries while scaling better on large polygons.
+For polygon workloads, `rasterizer` picks an internal strategy per polygon. Small polygon bounding boxes are handled with exact per-cell clipping. Larger ones use a signed per-edge area accumulation: each edge distributes exact area and cover contributions over the cells it crosses, and a row sweep turns the running cover into interior fill. Boundary cells keep exact fractional areas while the total cost scales with edge-cell crossings plus bbox size instead of re-clipping the polygon for every boundary cell.
 
 | Binary Mode                                            | Area Mode                                          |
 | ------------------------------------------------------ | -------------------------------------------------- |
@@ -69,7 +69,7 @@ For polygon workloads, `rasterizer` now uses two internal strategies. Small poly
 
 ### Large Dataset Showcase
 
-This real-world example uses 606,667 building polygons on a 10 m Lambert-93 grid covering Paris. The `area` rasterization step completes in 13.1 s on a regular laptop used as the local documentation machine for a `2804 x 1978` grid.
+This real-world example uses 606,667 building polygons on a 10 m Lambert-93 grid covering Paris. The `area` rasterization step completes in 3.9 s on a regular laptop used as the local documentation machine for a `2804 x 1978` grid.
 
 ```python
 import geopandas as gpd

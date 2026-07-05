@@ -27,10 +27,10 @@ The showcase uses a real building-footprint layer from a local GeoPackage:
 | Grid shape                  | 2,804 columns x 1,978 rows                            |
 | Grid cells                  | 5,546,312                                             |
 | Rasterization mode          | `area`                                                |
-| GeoPackage read time        | 5.0 s                                                 |
-| Measured rasterization time | 13.1 s                                                |
+| GeoPackage read time        | 2.8 s                                                 |
+| Measured rasterization time | 3.9 s                                                 |
 
-The rasterization timing above corresponds to the compute step itself, separate from GeoPackage I/O. It was generated locally on a regular Windows 11 laptop with Python 3.13 and 16 logical CPUs using `python scripts/generate_large_dataset_showcase.py`, which also writes the committed image and metadata used by this page.
+The rasterization timing above corresponds to the compute step itself, separate from GeoPackage I/O. It was generated locally on a regular Windows 11 laptop with Python 3.14 and 16 logical CPUs using `python scripts/generate_large_dataset_showcase.py`, which also writes the committed image and metadata used by this page.
 
 ## Notebook Flow
 

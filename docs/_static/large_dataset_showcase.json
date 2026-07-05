@@ -15,17 +15,17 @@
     "xmax": 666143.1,
     "ymax": 6872190.3
   },
-  "positive_cells": 2195409,
+  "positive_cells": 2195702,
   "max_cell_area_m2": 200.0,
-  "read_seconds": 2.833,
-  "rasterize_seconds": 6.678,
-  "total_seconds": 12.676,
-  "python_version": "3.13.12",
+  "read_seconds": 2.772,
+  "rasterize_seconds": 3.912,
+  "total_seconds": 10.174,
+  "python_version": "3.14.6",
   "platform": "Windows-11-10.0.26200-SP0",
   "cpu_count": 16,
   "image_path": "docs/_static/large_dataset_showcase.png",
   "color_scale": {
-    "vmin_quantile_20": 23.73095703125,
+    "vmin_quantile_20": 23.72216796875,
     "vmax_quantile_99_8": 200.0
   }
 }
