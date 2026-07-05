@@ -77,6 +77,14 @@ The previous large-polygon engine is still present and selectable through an int
 
 Its main remaining advantage is memory: it needs one byte per bbox cell (a boundary mask) where the accumulation path needs two ``float64`` accumulators, i.e. sixteen bytes per bbox cell, allocated transiently per polygon. For extremely large bounding boxes on fine grids that difference can matter.
 
+Numerical Behavior
+------------------
+
+Two details keep results consistent across coordinate reference systems:
+
+- The per-cell write threshold is relative: a cell receives a value when the polygon covers more than ``1e-12`` of the cell's area. An absolute threshold in CRS units squared would be invisible on metric grids but drop low-coverage boundary cells on degree grids, where one arc-second cells measure only ``7.7e-8`` square degrees.
+- All clipping and accumulation arithmetic runs in cell- or window-local coordinates. Projected CRSs place coordinates at 1e5 to 1e7 magnitudes, where double-precision products lose enough resolution to disturb sliver areas; translating to a local origin first keeps rounding at the scale of the polygon instead of the scale of the CRS offset.
+
 Benchmark-Driven Threshold Tuning
 ---------------------------------
 

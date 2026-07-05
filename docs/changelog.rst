@@ -4,7 +4,7 @@ Changelog
 v0.3.5
 ------
 
-Unreleased.
+Released 2026-07-05.
 
 This release replaces the default large-polygon engine with a signed per-edge area accumulation path and trims polygon preprocessing memory.
 
@@ -12,7 +12,9 @@ This release replaces the default large-polygon engine with a signed per-edge ar
 - the previous hybrid path is retained behind an internal vertex threshold as a fallback; forcing it remains covered by the test suite
 - exact and hybrid clipping now skip interior rings whose bounding box does not touch the cell, which alone gave ~4x on a 500-polygons-with-50-holes workload
 - interior ring coordinates are sliced from the single all-coordinates array instead of being extracted a second time, removing a duplicate coordinate copy and one extraction pass
-- added a regression test for the polygon clip scratch overflow fixed in ``5f7c540`` and randomized cross-strategy equivalence tests (jagged stars, grid-overhanging polygons, multi-hole polygons)
+- the per-cell write threshold is now relative to the cell size (``1e-12`` of one cell's area) instead of an absolute ``1e-9`` in CRS units squared; degree-scale grids no longer silently drop low-coverage boundary cells (at one arc-second per cell the old cutoff was 1.3% of a cell, and below roughly ``3e-5`` degrees per cell it exceeded the full cell area)
+- clipping and accumulation arithmetic runs in cell- and window-local coordinates, so per-cell results no longer pick up rounding noise proportional to absolute coordinate magnitudes in projected CRSs
+- added a regression test for the polygon clip scratch overflow fixed in ``5f7c540``, randomized cross-strategy equivalence tests (jagged stars, grid-overhanging polygons, multi-hole polygons), and degree-scale plus large-coordinate-offset grid tests
 
 On the local review workloads the new default measured 2.8x (100k small mixed polygons) to 36x (one 16k-vertex circle) faster; the Paris building showcase (606,667 polygons, 10 m grid) went from ``6.7 s`` to ``3.9 s``.
 

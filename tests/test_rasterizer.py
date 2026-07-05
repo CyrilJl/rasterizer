@@ -6,6 +6,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from scipy.spatial import ConvexHull
+from shapely import affinity
 from shapely.geometry import (
     LineString,
     MultiLineString,
@@ -566,6 +567,54 @@ def test_rasterize_spiky_polygon_survives_clip_scratch_overflow(
         np.testing.assert_allclose(raster.values, expected, atol=1e-9)
     else:
         np.testing.assert_array_equal(raster.values, expected)
+
+
+@pytest.mark.parametrize("strategy", _POLYGON_STRATEGIES)
+def test_rasterize_polygons_degree_scale_grid(grid_gdf, monkeypatch, strategy):
+    """
+    Degree-scale grids (e.g. EPSG:4326 at one arc-second) have cell areas
+    around 7.7e-8 deg^2, so the per-cell area write threshold must scale with
+    the cell size; an absolute threshold silently drops low-coverage boundary
+    cells at this scale.
+    """
+    _force_polygon_strategy(monkeypatch, strategy)
+    scale = 1.0 / 3600.0  # one arc-second per grid cell
+
+    gdf_metric = gpd.GeoDataFrame(geometry=[_make_donut_polygon()], crs=CRS)
+    # Scaling geometry and grid together scales every intersection area by
+    # scale**2, so the metric overlay is an exact ground truth.
+    expected = _expected_polygon_areas(grid_gdf, gdf_metric) * scale**2
+
+    scaled_geometry = [affinity.scale(geom, xfact=scale, yfact=scale, origin=(0, 0)) for geom in gdf_metric.geometry]
+    gdf_degrees = gpd.GeoDataFrame(geometry=scaled_geometry, crs=None)
+
+    raster_area = rasterize_polygons(gdf_degrees, x=X * scale, y=Y * scale, mode="area")
+    raster_binary = rasterize_polygons(gdf_degrees, x=X * scale, y=Y * scale, mode="binary")
+
+    np.testing.assert_allclose(raster_area.values, expected, rtol=1e-7, atol=1e-19)
+    np.testing.assert_array_equal(raster_binary.values, expected > 0)
+
+
+@pytest.mark.parametrize("strategy", ["hybrid", "accum"])
+def test_rasterize_polygons_large_coordinate_offset_strategies_agree(monkeypatch, strategy):
+    """
+    Projected CRSs put coordinates at 1e5-1e7 magnitudes; engine arithmetic
+    must stay in local frames so per-cell results do not pick up
+    coordinate-magnitude rounding noise.
+    """
+    offset_x, offset_y = 600000.0, 6800000.0
+    donut = affinity.translate(_make_donut_polygon(), xoff=offset_x, yoff=offset_y)
+    gdf_polygons = gpd.GeoDataFrame(geometry=[donut], crs=CRS)
+    x = X + offset_x
+    y = Y + offset_y
+
+    _force_polygon_strategy(monkeypatch, "direct")
+    raster_exact = rasterize_polygons(gdf_polygons, x=x, y=y, crs=CRS, mode="area")
+
+    _force_polygon_strategy(monkeypatch, strategy)
+    raster_strategy = rasterize_polygons(gdf_polygons, x=x, y=y, crs=CRS, mode="area")
+
+    np.testing.assert_allclose(raster_strategy.values, raster_exact.values, rtol=1e-9, atol=1e-12)
 
 
 @pytest.mark.parametrize("strategy", _POLYGON_STRATEGIES)
