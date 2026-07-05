@@ -367,12 +367,8 @@ def _rasterize_lines_range_engine(
     line_weights: np.ndarray,
     start_line_idx: int,
     end_line_idx: int,
-    x: np.ndarray,
-    y: np.ndarray,
     dx: float,
     dy: float,
-    half_dx: float,
-    half_dy: float,
     x_grid_min: float,
     x_grid_max: float,
     y_grid_min: float,
@@ -412,50 +408,8 @@ def _rasterize_lines_range_engine(
             )
 
 
-@njit(cache=True)
-def _rasterize_lines_engine(
-    coords: np.ndarray,
-    line_offsets: np.ndarray,
-    line_weights: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    dx: float,
-    dy: float,
-    half_dx: float,
-    half_dy: float,
-    x_grid_min: float,
-    x_grid_max: float,
-    y_grid_min: float,
-    y_grid_max: float,
-    mode_is_binary: bool,
-) -> np.ndarray:
-    """Rasterizes lines on a grid."""
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-    _rasterize_lines_range_engine(
-        coords,
-        line_offsets,
-        line_weights,
-        0,
-        len(line_weights),
-        x,
-        y,
-        dx,
-        dy,
-        half_dx,
-        half_dy,
-        x_grid_min,
-        x_grid_max,
-        y_grid_min,
-        y_grid_max,
-        mode_is_binary,
-        raster_data,
-    )
-
-    return raster_data
-
-
-@njit(cache=True)
-def _clip_polygon_area_to_box_numba(
+@njit(cache=True, inline="always")
+def _clip_polygon_area_to_box_bounded(
     subject_coords: np.ndarray,
     xmin: float,
     ymin: float,
@@ -464,10 +418,17 @@ def _clip_polygon_area_to_box_numba(
     scratch_a: np.ndarray,
     scratch_b: np.ndarray,
 ) -> float:
-    """Clips a polygon to a rectangular box and returns the clipped area."""
+    """Clips a polygon to a rectangular box and returns the clipped area.
+
+    Returns -1.0 if the scratch buffers are too small: one clip stage emits up
+    to two vertices per input vertex, so rings that cross a clip line many
+    times can outgrow any fixed capacity.
+    """
     count = len(subject_coords)
     if count < 3:
         return 0.0
+    if scratch_a.shape[0] < count:
+        return -1.0
 
     for i in range(count):
         scratch_a[i, 0] = subject_coords[i, 0]
@@ -492,6 +453,11 @@ def _clip_polygon_area_to_box_numba(
             value = ymin
         elif edge == 3:
             value = ymax
+
+        # Conservative per-stage bound: one stage emits at most two vertices
+        # per input vertex. Bailing out here keeps the inner loop check-free.
+        if dst.shape[0] < 2 * count:
+            return -1.0
 
         output_count = 0
         p1x = src[count - 1, 0]
@@ -558,9 +524,28 @@ def _clip_polygon_area_to_box_numba(
 
 
 @njit(cache=True)
+def _clip_polygon_area_to_box_grow(
+    subject_coords: np.ndarray,
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    start_capacity: int,
+) -> float:
+    """Cold path: the ring outgrew the scratch buffers; retry with larger ones."""
+    capacity = 2 * start_capacity + 2 * len(subject_coords) + 16
+    while True:
+        grown_a = np.empty((capacity, 2), dtype=np.float64)
+        grown_b = np.empty((capacity, 2), dtype=np.float64)
+        area = _clip_polygon_area_to_box_bounded(subject_coords, xmin, ymin, xmax, ymax, grown_a, grown_b)
+        if area >= 0.0:
+            return area
+        capacity *= 2
+
+
+@njit(cache=True)
 def _polygon_ring_vertex_counts_numba(
     polygon_idx: int,
-    exteriors_offsets: np.ndarray,
     exterior_lengths: np.ndarray,
     interiors_ring_offsets: np.ndarray,
     interiors_poly_offsets: np.ndarray,
@@ -599,7 +584,7 @@ def _clip_polygon_cell_area_numba(
     ext_start = exteriors_offsets[polygon_idx]
     ext_end = ext_start + exterior_lengths[polygon_idx]
     exterior_coords = exteriors_coords[ext_start:ext_end]
-    area = _clip_polygon_area_to_box_numba(
+    area = _clip_polygon_area_to_box_bounded(
         exterior_coords,
         cell_xmin,
         cell_ymin,
@@ -608,6 +593,10 @@ def _clip_polygon_cell_area_numba(
         scratch_a,
         scratch_b,
     )
+    if area < 0.0:
+        area = _clip_polygon_area_to_box_grow(
+            exterior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, scratch_a.shape[0]
+        )
 
     poly_int_start = interiors_poly_offsets[polygon_idx]
     poly_int_end = interiors_poly_offsets[polygon_idx + 1]
@@ -616,7 +605,7 @@ def _clip_polygon_cell_area_numba(
         int_start = interiors_ring_offsets[j]
         int_end = interiors_ring_offsets[j + 1]
         interior_coords = interiors_coords[int_start:int_end]
-        area -= _clip_polygon_area_to_box_numba(
+        ring_area = _clip_polygon_area_to_box_bounded(
             interior_coords,
             cell_xmin,
             cell_ymin,
@@ -625,6 +614,11 @@ def _clip_polygon_cell_area_numba(
             scratch_a,
             scratch_b,
         )
+        if ring_area < 0.0:
+            ring_area = _clip_polygon_area_to_box_grow(
+                interior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, scratch_a.shape[0]
+            )
+        area -= ring_area
 
     return area
 
@@ -924,55 +918,6 @@ def _rasterize_polygon_bbox_hybrid(
 
 
 @njit(cache=True)
-def _rasterize_polygons_engine(
-    start_polygon_idx: int,
-    end_polygon_idx: int,
-    exteriors_coords: np.ndarray,
-    exteriors_offsets: np.ndarray,
-    exterior_lengths: np.ndarray,
-    interiors_coords: np.ndarray,
-    interiors_ring_offsets: np.ndarray,
-    interiors_poly_offsets: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    half_dx: float,
-    half_dy: float,
-    x_grid_min: float,
-    x_grid_max: float,
-    y_grid_min: float,
-    y_grid_max: float,
-    mode_is_binary: bool,
-    weights: np.ndarray,
-    large_polygon_threshold_cells: int,
-) -> np.ndarray:
-    """Rasterizes polygons on a grid."""
-    raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
-    _rasterize_polygons_range_engine(
-        start_polygon_idx,
-        end_polygon_idx,
-        exteriors_coords,
-        exteriors_offsets,
-        exterior_lengths,
-        interiors_coords,
-        interiors_ring_offsets,
-        interiors_poly_offsets,
-        x,
-        y,
-        half_dx,
-        half_dy,
-        x_grid_min,
-        x_grid_max,
-        y_grid_min,
-        y_grid_max,
-        mode_is_binary,
-        weights,
-        large_polygon_threshold_cells,
-        raster_data,
-    )
-    return raster_data
-
-
-@njit(cache=True)
 def _rasterize_polygons_range_engine(
     start_polygon_idx: int,
     end_polygon_idx: int,
@@ -1006,7 +951,6 @@ def _rasterize_polygons_range_engine(
     for i in range(start_polygon_idx, end_polygon_idx):
         ring_vertices, total_vertices = _polygon_ring_vertex_counts_numba(
             i,
-            exteriors_offsets,
             exterior_lengths,
             interiors_ring_offsets,
             interiors_poly_offsets,
@@ -1016,7 +960,10 @@ def _rasterize_polygons_range_engine(
         if total_vertices > max_total_ring_vertices:
             max_total_ring_vertices = total_vertices
 
-    scratch_capacity = max_ring_vertices + 8
+    # One clip stage emits at most two vertices per input vertex, so 2x the
+    # largest ring covers it; _clip_polygon_area_to_box_grow handles the rare
+    # rings that keep gaining vertices across successive stages.
+    scratch_capacity = 2 * max_ring_vertices + 16
     scratch_a = np.empty((scratch_capacity, 2), dtype=np.float64)
     scratch_b = np.empty((scratch_capacity, 2), dtype=np.float64)
     intersections = np.empty(max_total_ring_vertices, dtype=np.float64)

@@ -5,9 +5,7 @@ import numpy as np
 import xarray as xr
 from shapely import (
     get_coordinates,
-    get_exterior_ring,
     get_interior_ring,
-    get_num_geometries,
     get_num_interior_rings,
     get_parts,
 )
@@ -20,7 +18,7 @@ from ._misc import (
     prepare_vector_input,
     validate_regular_axis,
 )
-from ._numba_engines import _rasterize_polygons_engine, _rasterize_polygons_range_engine
+from ._numba_engines import _rasterize_polygons_range_engine
 
 # Above this bbox size, it is cheaper to fill interior spans and clip only
 # boundary cells than to clip every cell in the polygon bbox.
@@ -28,61 +26,10 @@ _HYBRID_POLYGON_THRESHOLD_CELLS = 36
 _PROGRESS_CHUNK_SIZE = 128
 
 
-def _explode_polygons(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoDataFrame | gpd.GeoSeries:
-    if isinstance(polygons, gpd.GeoDataFrame):
-        return cast(gpd.GeoDataFrame, polygons.explode(index_parts=False, ignore_index=True))
-    return polygons.explode(index_parts=False, ignore_index=True)
-
-
 def _geometry_array(polygons):
     if isinstance(polygons, (gpd.GeoDataFrame, gpd.GeoSeries)):
         return geometry_series(polygons).array
     return polygons
-
-
-def compute_exterior(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
-    """
-    Computes the exterior coordinates of polygons.
-    """
-    return geometry_series(polygons).explode().exterior.get_coordinates().reset_index().values
-
-
-def compute_interiors(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> np.ndarray:
-    """
-    Computes the interior coordinates of polygons.
-    """
-    # this is much faster than naively exploding all interiors
-    geom = geometry_series(polygons)
-    interiors = geom[geom.count_interior_rings() > 0].interiors
-    if interiors.empty:
-        return np.empty((0, 4), dtype=np.float64)
-
-    ret = interiors.explode(ignore_index=False).dropna().rename("geometry").reset_index()
-    if ret.empty:
-        return np.empty((0, 4), dtype=np.float64)
-
-    temp_df = ret.reset_index()
-    temp_df["sub_index"] = ret.groupby("index").cumcount()
-    ret["sub_index"] = temp_df["sub_index"].values
-
-    ret = gpd.GeoDataFrame(geometry=ret.geometry, data=ret[["index", "sub_index"]])
-    return ret.set_index(["index", "sub_index"]).get_coordinates().reset_index().values
-
-
-def _polygon_exterior_coordinates_and_offsets(
-    polygons,
-) -> tuple[np.ndarray, np.ndarray]:
-    geoms = _geometry_array(polygons)
-    rings = get_exterior_ring(geoms)
-    coords, ring_indexes = get_coordinates(rings, return_index=True)
-    coords = np.ascontiguousarray(coords, dtype=np.float64)
-    ring_indexes = np.asarray(ring_indexes, dtype=np.intp)
-
-    coord_counts = np.bincount(ring_indexes, minlength=len(geoms))
-    offsets = np.empty(len(geoms) + 1, dtype=np.intp)
-    offsets[0] = 0
-    np.cumsum(coord_counts, out=offsets[1:])
-    return coords, offsets
 
 
 def _polygon_all_coordinates_offsets_and_exterior_lengths(
@@ -116,28 +63,8 @@ def _repeated_ring_indexes(ring_counts: np.ndarray) -> np.ndarray:
 
 def _polygon_parts_and_indexes(polygons: gpd.GeoDataFrame | gpd.GeoSeries) -> tuple[np.ndarray, np.ndarray]:
     geoms = np.asarray(geometry_series(polygons).array, dtype=object)
-    part_counts = np.asarray(get_num_geometries(geoms), dtype=np.intp)
-    if np.all(part_counts == 1):
-        return geoms, np.arange(len(geoms), dtype=np.intp)
-
-    part_offsets = np.empty(len(geoms) + 1, dtype=np.intp)
-    part_offsets[0] = 0
-    np.cumsum(part_counts, out=part_offsets[1:])
-
-    total_parts = int(part_offsets[-1])
-    part_indexes = np.repeat(np.arange(len(geoms), dtype=np.intp), part_counts)
-    parts = np.empty(total_parts, dtype=object)
-
-    single_mask = part_counts == 1
-    parts[part_offsets[:-1][single_mask]] = geoms[single_mask]
-
-    for geom_idx in np.flatnonzero(~single_mask):
-        start = part_offsets[geom_idx]
-        end = part_offsets[geom_idx + 1]
-        if start < end:
-            parts[start:end] = get_parts(geoms[geom_idx])
-
-    return parts, part_indexes
+    parts, part_indexes = get_parts(geoms, return_index=True)
+    return parts, np.asarray(part_indexes, dtype=np.intp)
 
 
 def _polygon_interior_coordinates_and_offsets(
@@ -172,8 +99,7 @@ def _polygon_interior_coordinates_and_offsets(
     interiors_ring_offsets[0] = 0
     np.cumsum(coord_counts, out=interiors_ring_offsets[1:])
 
-    for ring_idx in range(total_rings):
-        interior_coord_counts[polygon_indexes[ring_idx]] += coord_counts[ring_idx]
+    interior_coord_counts = np.bincount(polygon_indexes, weights=coord_counts, minlength=len(geoms)).astype(np.intp)
 
     return coords, interiors_ring_offsets, interiors_poly_offsets, interior_coord_counts
 
@@ -282,61 +208,39 @@ def rasterize_polygons(
         interior_coord_counts,
     )
 
-    if not progress_bar:
-        raster_data_float = _rasterize_polygons_engine(
-            0,
-            num_polygons,
-            exteriors_coords,
-            exteriors_offsets,
-            exterior_lengths,
-            interiors_coords,
-            interiors_ring_offsets,
-            interiors_poly_offsets,
-            x,
-            y,
-            half_dx,
-            half_dy,
-            x_grid_min,
-            x_grid_max,
-            y_grid_min,
-            y_grid_max,
-            mode == "binary",
-            weights,
-            _HYBRID_POLYGON_THRESHOLD_CELLS,
-        )
-    else:
-        raster_data_float = np.zeros((len(y), len(x)), dtype=np.float64)
-        with maybe_progress_bar(num_polygons, "Rasterizing polygons", progress_bar) as progress:
-            for start_idx in range(0, num_polygons, _PROGRESS_CHUNK_SIZE):
-                end_idx = min(start_idx + _PROGRESS_CHUNK_SIZE, num_polygons)
-                _rasterize_polygons_range_engine(
-                    start_idx,
-                    end_idx,
-                    exteriors_coords,
-                    exteriors_offsets,
-                    exterior_lengths,
-                    interiors_coords,
-                    interiors_ring_offsets,
-                    interiors_poly_offsets,
-                    x,
-                    y,
-                    half_dx,
-                    half_dy,
-                    x_grid_min,
-                    x_grid_max,
-                    y_grid_min,
-                    y_grid_max,
-                    mode == "binary",
-                    weights,
-                    _HYBRID_POLYGON_THRESHOLD_CELLS,
-                    raster_data_float,
-                )
-                progress.update(end_idx - start_idx)
+    # uint8 for binary keeps the accumulation buffer 8x smaller than float64
+    # and can be reinterpreted as bool without a copy.
+    buffer_dtype = np.uint8 if mode == "binary" else np.float64
+    raster_buffer = np.zeros((len(y), len(x)), dtype=buffer_dtype)
+    chunk_size = _PROGRESS_CHUNK_SIZE if progress_bar else num_polygons
+    with maybe_progress_bar(num_polygons, "Rasterizing polygons", progress_bar) as progress:
+        for start_idx in range(0, num_polygons, chunk_size):
+            end_idx = min(start_idx + chunk_size, num_polygons)
+            _rasterize_polygons_range_engine(
+                start_idx,
+                end_idx,
+                exteriors_coords,
+                exteriors_offsets,
+                exterior_lengths,
+                interiors_coords,
+                interiors_ring_offsets,
+                interiors_poly_offsets,
+                x,
+                y,
+                half_dx,
+                half_dy,
+                x_grid_min,
+                x_grid_max,
+                y_grid_min,
+                y_grid_max,
+                mode == "binary",
+                weights,
+                _HYBRID_POLYGON_THRESHOLD_CELLS,
+                raster_buffer,
+            )
+            progress.update(end_idx - start_idx)
 
-    if mode == "binary":
-        raster_data = raster_data_float.astype(bool)
-    else:
-        raster_data = raster_data_float
+    raster_data = raster_buffer.view(bool) if mode == "binary" else raster_buffer
 
     raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
