@@ -4,7 +4,7 @@ from typing import Any, TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
-import rioxarray
+import rioxarray  # noqa: F401  # registers the .rio accessor on xarray objects
 import xarray as xr
 from shapely import bounds as shapely_bounds
 
