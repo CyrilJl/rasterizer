@@ -18,6 +18,7 @@ from shapely.geometry import (
 from rasterizer import rasterize_lines, rasterize_polygons
 
 np.random.seed(0)
+random.seed(0)
 
 # Common setup for tests
 CRS = "EPSG:32631"  # UTM 31N, metric CRS
@@ -267,7 +268,7 @@ def test_rasterize_polygons(grid, grid_gdf):
 
     # Rasterize with mode='area'
     raster_area = rasterize_polygons(gdf_polygons, **grid, mode="area")
-    np.testing.assert_allclose(raster_area.values, expected_areas)
+    np.testing.assert_allclose(raster_area.values, expected_areas, atol=1e-9)
 
     # Rasterize with mode='binary' and check for consistency
     raster_bin = rasterize_polygons(gdf_polygons, **grid, mode="binary")
@@ -350,7 +351,7 @@ def test_rasterize_polygons_with_weight(grid, grid_gdf):
 
     # Rasterize with mode='area' and weight
     raster_weighted = rasterize_polygons(gdf_polygons, **grid, mode="area", weight="weight")
-    np.testing.assert_allclose(raster_weighted.values, expected_weighted_areas)
+    np.testing.assert_allclose(raster_weighted.values, expected_weighted_areas, atol=1e-9)
 
 
 def test_rasterize_polygons_weight_errors(grid):

@@ -13,9 +13,18 @@ from ._misc import (
     prepare_vector_input,
     validate_regular_axis,
 )
-from ._numba_engines import _rasterize_lines_engine, _rasterize_lines_range_engine
+from ._numba_engines import _rasterize_lines_range_engine
 
 _PROGRESS_CHUNK_SIZE = 128
+
+
+def _empty_line_raster(x: np.ndarray, y: np.ndarray, crs, mode: str) -> xr.DataArray:
+    if mode == "binary":
+        raster_data = np.full((len(y), len(x)), False, dtype=bool)
+    else:
+        raster_data = np.zeros((len(y), len(x)), dtype=np.float64)
+    raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
+    return geocode(raster, "x", "y", crs)
 
 
 def _explode_lines(lines: gpd.GeoDataFrame | gpd.GeoSeries) -> gpd.GeoDataFrame | gpd.GeoSeries:
@@ -83,12 +92,7 @@ def rasterize_lines(
     lines_proj, crs = prepare_vector_input(lines, crs, ["LineString", "MultiLineString"], weight=weight)
 
     if len(x) < 2 or len(y) < 2:
-        if mode == "binary":
-            raster_data = np.full((len(y), len(x)), False, dtype=bool)
-        else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-        return geocode(raster, "x", "y", crs)
+        return _empty_line_raster(x, y, crs, mode)
 
     dx = validate_regular_axis(x, "x")
     dy = validate_regular_axis(y, "y")
@@ -116,12 +120,7 @@ def rasterize_lines(
         lines_proj = cast(gpd.GeoDataFrame | gpd.GeoSeries, lines_proj)
 
     if lines_proj.empty:
-        if mode == "binary":
-            raster_data = np.full((len(y), len(x)), False, dtype=bool)
-        else:
-            raster_data = np.zeros((len(y), len(x)), dtype=np.float32)
-        raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
-        return geocode(raster, "x", "y", crs)
+        return _empty_line_raster(x, y, crs, mode)
 
     lines_proj = _explode_lines(lines_proj)
     num_lines = len(lines_proj)
@@ -133,53 +132,32 @@ def rasterize_lines(
 
     coords, line_offsets = _line_coordinates_and_offsets(lines_proj)
 
-    if not progress_bar:
-        raster_data_float = _rasterize_lines_engine(
-            coords,
-            line_offsets,
-            weights,
-            x,
-            y,
-            dx,
-            dy,
-            half_dx,
-            half_dy,
-            x_grid_min,
-            x_grid_max,
-            y_grid_min,
-            y_grid_max,
-            mode == "binary",
-        )
-    else:
-        raster_data_float = np.zeros((len(y), len(x)), dtype=np.float64)
-        with maybe_progress_bar(num_lines, "Rasterizing lines", progress_bar) as progress:
-            for start_idx in range(0, num_lines, _PROGRESS_CHUNK_SIZE):
-                end_idx = min(start_idx + _PROGRESS_CHUNK_SIZE, num_lines)
-                _rasterize_lines_range_engine(
-                    coords,
-                    line_offsets,
-                    weights,
-                    start_idx,
-                    end_idx,
-                    x,
-                    y,
-                    dx,
-                    dy,
-                    half_dx,
-                    half_dy,
-                    x_grid_min,
-                    x_grid_max,
-                    y_grid_min,
-                    y_grid_max,
-                    mode == "binary",
-                    raster_data_float,
-                )
-                progress.update(end_idx - start_idx)
+    # uint8 for binary keeps the accumulation buffer 8x smaller than float64
+    # and can be reinterpreted as bool without a copy.
+    buffer_dtype = np.uint8 if mode == "binary" else np.float64
+    raster_buffer = np.zeros((len(y), len(x)), dtype=buffer_dtype)
+    chunk_size = _PROGRESS_CHUNK_SIZE if progress_bar else num_lines
+    with maybe_progress_bar(num_lines, "Rasterizing lines", progress_bar) as progress:
+        for start_idx in range(0, num_lines, chunk_size):
+            end_idx = min(start_idx + chunk_size, num_lines)
+            _rasterize_lines_range_engine(
+                coords,
+                line_offsets,
+                weights,
+                start_idx,
+                end_idx,
+                dx,
+                dy,
+                x_grid_min,
+                x_grid_max,
+                y_grid_min,
+                y_grid_max,
+                mode == "binary",
+                raster_buffer,
+            )
+            progress.update(end_idx - start_idx)
 
-    if mode == "binary":
-        raster_data = raster_data_float.astype(bool)
-    else:
-        raster_data = raster_data_float
+    raster_data = raster_buffer.view(bool) if mode == "binary" else raster_buffer
 
     raster = xr.DataArray(raster_data, coords={"y": y, "x": x}, dims=["y", "x"])
 
