@@ -415,10 +415,16 @@ def _clip_polygon_area_to_box_bounded(
     ymin: float,
     xmax: float,
     ymax: float,
+    origin_x: float,
+    origin_y: float,
     scratch_a: np.ndarray,
     scratch_b: np.ndarray,
 ) -> float:
     """Clips a polygon to a rectangular box and returns the clipped area.
+
+    Coordinates are translated by ``origin`` while copying into the scratch so
+    intersection and shoelace arithmetic run near zero: rounding then scales
+    with local extents instead of absolute CRS coordinate magnitudes.
 
     Returns -1.0 if the scratch buffers are too small: one clip stage emits up
     to two vertices per input vertex, so rings that cross a clip line many
@@ -431,8 +437,13 @@ def _clip_polygon_area_to_box_bounded(
         return -1.0
 
     for i in range(count):
-        scratch_a[i, 0] = subject_coords[i, 0]
-        scratch_a[i, 1] = subject_coords[i, 1]
+        scratch_a[i, 0] = subject_coords[i, 0] - origin_x
+        scratch_a[i, 1] = subject_coords[i, 1] - origin_y
+
+    box_xmin = xmin - origin_x
+    box_xmax = xmax - origin_x
+    box_ymin = ymin - origin_y
+    box_ymax = ymax - origin_y
 
     use_first_buffer = True
     for edge in range(4):
@@ -446,13 +457,13 @@ def _clip_polygon_area_to_box_bounded(
             src = scratch_b
             dst = scratch_a
 
-        value = xmin
+        value = box_xmin
         if edge == 1:
-            value = xmax
+            value = box_xmax
         elif edge == 2:
-            value = ymin
+            value = box_ymin
         elif edge == 3:
-            value = ymax
+            value = box_ymax
 
         # Conservative per-stage bound: one stage emits at most two vertices
         # per input vertex. Bailing out here keeps the inner loop check-free.
@@ -530,6 +541,8 @@ def _clip_polygon_area_to_box_grow(
     ymin: float,
     xmax: float,
     ymax: float,
+    origin_x: float,
+    origin_y: float,
     start_capacity: int,
 ) -> float:
     """Cold path: the ring outgrew the scratch buffers; retry with larger ones."""
@@ -537,7 +550,9 @@ def _clip_polygon_area_to_box_grow(
     while True:
         grown_a = np.empty((capacity, 2), dtype=np.float64)
         grown_b = np.empty((capacity, 2), dtype=np.float64)
-        area = _clip_polygon_area_to_box_bounded(subject_coords, xmin, ymin, xmax, ymax, grown_a, grown_b)
+        area = _clip_polygon_area_to_box_bounded(
+            subject_coords, xmin, ymin, xmax, ymax, origin_x, origin_y, grown_a, grown_b
+        )
         if area >= 0.0:
             return area
         capacity *= 2
@@ -550,15 +565,18 @@ def _clip_ring_to_box_bounded(
     ymin: float,
     xmax: float,
     ymax: float,
+    origin_x: float,
+    origin_y: float,
     scratch_a: np.ndarray,
     scratch_b: np.ndarray,
 ) -> int:
     """Clips a ring to a rectangular box, leaving the clipped ring in ``scratch_a``.
 
     Same Sutherland-Hodgman stages as ``_clip_polygon_area_to_box_bounded`` but
-    keeps the vertices instead of reducing them to an area. Returns the clipped
-    vertex count, or -1 if the scratch buffers are too small (the four-stage
-    ping-pong always ends back in ``scratch_a``).
+    keeps the vertices instead of reducing them to an area; the output ring is
+    expressed relative to ``origin`` like the translated scratch copy. Returns
+    the clipped vertex count, or -1 if the scratch buffers are too small (the
+    four-stage ping-pong always ends back in ``scratch_a``).
     """
     count = len(subject_coords)
     if count < 3:
@@ -567,8 +585,13 @@ def _clip_ring_to_box_bounded(
         return -1
 
     for i in range(count):
-        scratch_a[i, 0] = subject_coords[i, 0]
-        scratch_a[i, 1] = subject_coords[i, 1]
+        scratch_a[i, 0] = subject_coords[i, 0] - origin_x
+        scratch_a[i, 1] = subject_coords[i, 1] - origin_y
+
+    box_xmin = xmin - origin_x
+    box_xmax = xmax - origin_x
+    box_ymin = ymin - origin_y
+    box_ymax = ymax - origin_y
 
     use_first_buffer = True
     for edge in range(4):
@@ -582,13 +605,13 @@ def _clip_ring_to_box_bounded(
             src = scratch_b
             dst = scratch_a
 
-        value = xmin
+        value = box_xmin
         if edge == 1:
-            value = xmax
+            value = box_xmax
         elif edge == 2:
-            value = ymin
+            value = box_ymin
         elif edge == 3:
-            value = ymax
+            value = box_ymax
 
         if dst.shape[0] < 2 * count:
             return -1
@@ -655,6 +678,8 @@ def _clip_ring_to_box_grow(
     ymin: float,
     xmax: float,
     ymax: float,
+    origin_x: float,
+    origin_y: float,
     start_capacity: int,
 ) -> tuple[np.ndarray, int]:
     """Cold path: the ring outgrew the scratch buffers; retry with larger ones."""
@@ -662,7 +687,7 @@ def _clip_ring_to_box_grow(
     while True:
         grown_a = np.empty((capacity, 2), dtype=np.float64)
         grown_b = np.empty((capacity, 2), dtype=np.float64)
-        count = _clip_ring_to_box_bounded(subject_coords, xmin, ymin, xmax, ymax, grown_a, grown_b)
+        count = _clip_ring_to_box_bounded(subject_coords, xmin, ymin, xmax, ymax, origin_x, origin_y, grown_a, grown_b)
         if count >= 0:
             return grown_a, count
         capacity *= 2
@@ -689,20 +714,18 @@ def _accumulate_ring_edges(
     dy: float,
     inv_dx: float,
     inv_dy: float,
-    x_grid_min: float,
-    y_grid_min: float,
-    ix_start: int,
-    iy_start: int,
     area_acc: np.ndarray,
     cover_acc: np.ndarray,
 ) -> None:
     """Adds a ring's signed trapezoid areas and covers to the window accumulators.
 
-    For the sub-segment of each edge inside a cell, ``area_acc`` gains the
-    signed area between the sub-segment and the cell's left edge and
-    ``cover_acc`` gains the signed dy. The final sub-segment of every edge ends
-    exactly on the edge endpoint so covers telescope to zero over a closed
-    ring, keeping the row sweep exact outside the polygon.
+    ``ring_coords`` is expressed relative to the window origin, so cell
+    boundaries sit at multiples of the cell size and all arithmetic stays at
+    local magnitudes. For the sub-segment of each edge inside a cell,
+    ``area_acc`` gains the signed area between the sub-segment and the cell's
+    left edge and ``cover_acc`` gains the signed dy. The final sub-segment of
+    every edge ends exactly on the edge endpoint so covers telescope to zero
+    over a closed ring, keeping the row sweep exact outside the polygon.
     """
     bbox_height, bbox_width = area_acc.shape
     for i in range(count):
@@ -721,8 +744,8 @@ def _accumulate_ring_edges(
         vx = xb - xa
         vy = yb - ya
         t_current = 0.0
-        t_next_x, t_delta_x = _initial_incremental_crossing_t(xa, xa, vx, x_grid_min, dx, inv_dx, 0.0)
-        t_next_y, t_delta_y = _initial_incremental_crossing_t(ya, ya, vy, y_grid_min, dy, inv_dy, 0.0)
+        t_next_x, t_delta_x = _initial_incremental_crossing_t(xa, xa, vx, 0.0, dx, inv_dx, 0.0)
+        t_next_y, t_delta_y = _initial_incremental_crossing_t(ya, ya, vy, 0.0, dy, inv_dy, 0.0)
 
         x_sub_start = xa
         y_sub_start = ya
@@ -740,8 +763,8 @@ def _accumulate_ring_edges(
 
             x_mid = 0.5 * (x_sub_start + x_sub_end)
             y_mid = 0.5 * (y_sub_start + y_sub_end)
-            local_ix = _grid_cell_index(x_mid, x_grid_min, inv_dx) - ix_start
-            local_iy = _grid_cell_index(y_mid, y_grid_min, inv_dy) - iy_start
+            local_ix = _grid_cell_index(x_mid, 0.0, inv_dx)
+            local_iy = _grid_cell_index(y_mid, 0.0, inv_dy)
             if local_ix < 0:
                 local_ix = 0
             elif local_ix >= bbox_width:
@@ -751,7 +774,7 @@ def _accumulate_ring_edges(
             elif local_iy >= bbox_height:
                 local_iy = bbox_height - 1
 
-            cell_xmin = x_grid_min + (ix_start + local_ix) * dx
+            cell_xmin = local_ix * dx
             segment_dy = y_sub_end - y_sub_start
             area_acc[local_iy, local_ix] += (
                 orientation * 0.5 * ((x_sub_start - cell_xmin) + (x_sub_end - cell_xmin)) * segment_dy
@@ -785,10 +808,6 @@ def _accumulate_ring_maybe_clipped(
     dy: float,
     inv_dx: float,
     inv_dy: float,
-    x_grid_min: float,
-    y_grid_min: float,
-    ix_start: int,
-    iy_start: int,
     area_acc: np.ndarray,
     cover_acc: np.ndarray,
     scratch_a: np.ndarray,
@@ -798,15 +817,22 @@ def _accumulate_ring_maybe_clipped(
         return
 
     if ring_xmin >= win_xmin and ring_xmax <= win_xmax and ring_ymin >= win_ymin and ring_ymax <= win_ymax:
-        ring = ring_coords
+        # Translate to the window origin; scratch_a always fits a whole ring.
         count = len(ring_coords)
+        for i in range(count):
+            scratch_a[i, 0] = ring_coords[i, 0] - win_xmin
+            scratch_a[i, 1] = ring_coords[i, 1] - win_ymin
+        ring = scratch_a
     else:
         # The window was clamped to the grid: clip the ring to it so travel
-        # along the window boundary keeps the winding closed.
-        count = _clip_ring_to_box_bounded(ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, scratch_a, scratch_b)
+        # along the window boundary keeps the winding closed. The clipped
+        # output is already window-local.
+        count = _clip_ring_to_box_bounded(
+            ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, win_xmin, win_ymin, scratch_a, scratch_b
+        )
         if count < 0:
             ring, count = _clip_ring_to_box_grow(
-                ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, scratch_a.shape[0]
+                ring_coords, win_xmin, win_ymin, win_xmax, win_ymax, win_xmin, win_ymin, scratch_a.shape[0]
             )
         else:
             ring = scratch_a
@@ -831,10 +857,6 @@ def _accumulate_ring_maybe_clipped(
         dy,
         inv_dx,
         inv_dy,
-        x_grid_min,
-        y_grid_min,
-        ix_start,
-        iy_start,
         area_acc,
         cover_acc,
     )
@@ -903,18 +925,22 @@ def _clip_polygon_cell_area_numba(
     ext_start = coords_offsets[polygon_idx]
     ext_end = ext_start + exterior_lengths[polygon_idx]
     exterior_coords = coords[ext_start:ext_end]
+    # The cell corner is the local origin: clip arithmetic stays exact-scale
+    # even when the CRS puts coordinates at 1e6-plus magnitudes.
     area = _clip_polygon_area_to_box_bounded(
         exterior_coords,
         cell_xmin,
         cell_ymin,
         cell_xmax,
         cell_ymax,
+        cell_xmin,
+        cell_ymin,
         scratch_a,
         scratch_b,
     )
     if area < 0.0:
         area = _clip_polygon_area_to_box_grow(
-            exterior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, scratch_a.shape[0]
+            exterior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, cell_xmin, cell_ymin, scratch_a.shape[0]
         )
 
     poly_int_start = interiors_poly_offsets[polygon_idx]
@@ -939,12 +965,14 @@ def _clip_polygon_cell_area_numba(
             cell_ymin,
             cell_xmax,
             cell_ymax,
+            cell_xmin,
+            cell_ymin,
             scratch_a,
             scratch_b,
         )
         if ring_area < 0.0:
             ring_area = _clip_polygon_area_to_box_grow(
-                interior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, scratch_a.shape[0]
+                interior_coords, cell_xmin, cell_ymin, cell_xmax, cell_ymax, cell_xmin, cell_ymin, scratch_a.shape[0]
             )
         area -= ring_area
 
@@ -1065,6 +1093,7 @@ def _rasterize_polygon_bbox_exact(
     half_dy: float,
     mode_is_binary: bool,
     weight: float,
+    min_area: float,
     ix_start: int,
     ix_end: int,
     iy_start: int,
@@ -1099,7 +1128,7 @@ def _rasterize_polygon_bbox_exact(
                 scratch_b,
             )
 
-            if area > 1e-9:
+            if area > min_area:
                 if mode_is_binary:
                     raster_data[iy, ix] = 1
                 else:
@@ -1122,6 +1151,7 @@ def _rasterize_polygon_bbox_hybrid(
     half_dy: float,
     mode_is_binary: bool,
     weight: float,
+    min_area: float,
     ix_start: int,
     ix_end: int,
     iy_start: int,
@@ -1242,7 +1272,7 @@ def _rasterize_polygon_bbox_hybrid(
                 scratch_b,
             )
 
-            if area > 1e-9:
+            if area > min_area:
                 if mode_is_binary:
                     raster_data[iy, ix] = 1
                 else:
@@ -1269,6 +1299,7 @@ def _rasterize_polygon_bbox_accum(
     half_dy: float,
     mode_is_binary: bool,
     weight: float,
+    min_area: float,
     ix_start: int,
     ix_end: int,
     iy_start: int,
@@ -1317,10 +1348,6 @@ def _rasterize_polygon_bbox_accum(
         dy,
         inv_dx,
         inv_dy,
-        x_grid_min,
-        y_grid_min,
-        ix_start,
-        iy_start,
         area_acc,
         cover_acc,
         scratch_a,
@@ -1348,10 +1375,6 @@ def _rasterize_polygon_bbox_accum(
             dy,
             inv_dx,
             inv_dy,
-            x_grid_min,
-            y_grid_min,
-            ix_start,
-            iy_start,
             area_acc,
             cover_acc,
             scratch_a,
@@ -1368,7 +1391,7 @@ def _rasterize_polygon_bbox_accum(
         for local_ix in range(bbox_width):
             running_cover -= cover_acc[local_iy, local_ix]
             covered = area_acc[local_iy, local_ix] + running_cover * dx
-            if covered > 1e-9:
+            if covered > min_area:
                 ix = ix_start + local_ix
                 if mode_is_binary:
                     raster_data[iy, ix] = 1
@@ -1406,6 +1429,10 @@ def _rasterize_polygons_range_engine(
     inv_dy = 1.0 / (2.0 * half_dy)
     nx = len(x)
     ny = len(y)
+    # Write threshold relative to the cell size (1e-12 of one cell) so degree
+    # grids with tiny cell areas keep low-coverage boundary cells while metric
+    # grids stay above rounding noise (engine arithmetic is bbox-local).
+    min_area = 1e-12 * (2.0 * half_dx) * (2.0 * half_dy)
     max_ring_vertices = 1
     max_total_ring_vertices = 1
     max_interior_rings = 1
@@ -1484,6 +1511,7 @@ def _rasterize_polygons_range_engine(
                 half_dy,
                 mode_is_binary,
                 weight,
+                min_area,
                 ix_start,
                 ix_end,
                 iy_start,
@@ -1519,6 +1547,7 @@ def _rasterize_polygons_range_engine(
                     half_dy,
                     mode_is_binary,
                     weight,
+                    min_area,
                     ix_start,
                     ix_end,
                     iy_start,
@@ -1543,6 +1572,7 @@ def _rasterize_polygons_range_engine(
                     half_dy,
                     mode_is_binary,
                     weight,
+                    min_area,
                     ix_start,
                     ix_end,
                     iy_start,
